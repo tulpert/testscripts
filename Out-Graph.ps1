@@ -30,6 +30,10 @@ A link here
     
     Begin {
 
+        if ($TimeLine.length -eq 0) {
+            Remove-Variable TimeLine
+        }
+
 		if ($PSBoundParameters['Debug']) {
 		    $DebugPreference = 'Continue'
         	$Debug = $true
@@ -37,7 +41,6 @@ A link here
 			$Debug = $false
 		}
         $DataHash = New-Object hashtable
-        $MultipleWarning = @()
     }
     Process {
         if ($InputObject) {
@@ -80,7 +83,7 @@ A link here
 		$Ticks      = $false
         $SortedKeys = $DataHash.Keys | Sort
 
-		if ($TimeLine -eq "Auto"   ) {
+		if ( $TimeLine ) {
 			Write-Debug "TimeLine is set. Will determine first and last time slots in x axis"
 			Write-Debug "TimeLine flag is set. Will try to reorganize graph to display data correctly"
 
@@ -89,30 +92,34 @@ A link here
             Write-Debug ("FirstDate: "+ $FirstDate)
             Write-Debug ("LastDate: " + $LastDate)
 			$TickResult = ((Get-Date $LastDate) - (Get-Date $FirstDate))
+            Write-Debug $TickResult
 			if ($PSBoundParameters['Debug']) {
 				$TickResult
 			}
 
-			$OptimalHigh = 45
-			if ($TickResult.TotalDays -gt (($OptimalHigh / 12) * 365)) {
-				$TimeLine = "Years"
-			} elseif ( $TickResult.TotalDays -gt (($OptimalHigh / 7) * 52) ) {
-				$TimeLine = "Months"
-			} elseif ( $TickResult.TotalDays -gt 20 ) {
-				$TimeLine = "Weeks"
-			} elseif ( $TickResult.TotalDays -gt 5 ) {
-				$TimeLine = "Days"
-			} elseif ( $TickResult.TotalHours -gt 5 ) {
-				$TimeLine = "Hours"
-			} elseif ( $TickResult.TotalMinutes -gt 5 ) {
-				$TimeLine = "Minutes"
-			} elseif ( $TickResult.TotalSeconds -gt 5 ) {
-				$TimeLine = "Seconds"
-			} elseif ( $TickResult.TotalMilliseconds -gt 5 ) {
-				$TimeLine = "Milliseconds"
-			} else {
-				$TimeLine = "Minutes"
-			}
+            if ( $TimeLine -eq "Auto" ) {
+		        $OptimalHigh = 45
+
+		        if ($TickResult.TotalDays -gt (($OptimalHigh / 12) * 365)) {
+		        	$TimeLine = "Years"
+		        } elseif ( $TickResult.TotalDays -gt (($OptimalHigh / 7) * 52) ) {
+		        	$TimeLine = "Months"
+		        } elseif ( $TickResult.TotalDays -gt 20 ) {
+		        	$TimeLine = "Weeks"
+		        } elseif ( $TickResult.TotalDays -gt 5 ) {
+		        	$TimeLine = "Days"
+		        } elseif ( $TickResult.TotalHours -gt 5 ) {
+		        	$TimeLine = "Hours"
+		        } elseif ( $TickResult.TotalMinutes -gt 5 ) {
+		        	$TimeLine = "Minutes"
+		        } elseif ( $TickResult.TotalSeconds -gt 5 ) {
+		        	$TimeLine = "Seconds"
+		        } elseif ( $TickResult.TotalMilliseconds -gt 5 ) {
+		        	$TimeLine = "Milliseconds"
+		        } else {
+		        	$TimeLine = "Minutes"
+		        }
+            }
         }
 
 
@@ -120,46 +127,73 @@ A link here
         $xArray = @()
         $yArray = @()
         $xyArray = @{}
+        $tmpLastDateTime = $false
+        $PreviousKey = $false
+        $PreviousIndex = 0
         $SortedKeys  | Foreach-Object {
-			Write-Debug "-----"
-			Write-Debug ("Key: "+$_)
-			Write-Debug ("Label: "+$DataHash[$_].Label)
-            Write-Debug ("Value: " + $DataHash[$_].Value)
-            $xArray += $_
-            $yArray += $DataHash[$_].Value
-            $xyArray.Add($_, $DataHash[$_].Value)
-        }
+            $OriginalKey = $_
 
-        $tmpDataSet = @{}
-		switch ($TimeLine) {
-			"Days" {
-				"Days not implemented yet"
-			}
-			"Hours" {
-				"Hours not implemented yet"
-			}
-			"Minutes" {
-				"Minutes not implemented yet"
-                $tmpCurrentDateTime = $false
-                $DataHash.keys | % {
-                    $timestamp = Get-Date $_ -Format "ddd dd/MMM/yyyy"
-                    
-                }
-			}
-			"Months" {
-				"Months not implemented yet"
-			}
-			"Seconds" {
-				"Seconds not implemented yet"
-			}
-			"Years" {
-				"Years not implemented yet"
-			}
-			default {
-				"Default is not implemented yet"
-			}
-		}
+		    switch ($TimeLine) {
+		    	"Days" {
+		    		"Days not implemented yet"
+		    	}
+		    	"Hours" {
+		    		"Hours not implemented yet"
+		    	}
+		    	"Minutes" {
+		    		"Minutes - WIP"
+               #     Write-Debug ("OriginalKey: " + $OriginalKey)
+                    $NewKey = Get-Date $OriginalKey -Format "ddd dd/MMM/yyyy HH:mm"
+                    $NextTimeSlot = (Get-Date $NewKey).AddMinutes(1)
+                    # Write-Debug ("Next Timeslot: " + $NextTimeSlot)
+               #     Write-Debug ("Timestamp: " + $NewKey)
+                    if ($LastWasNew) {
+         Write-Host -foregroundcolor green ("Diff between last: " + ((Get-Date $NewKey) - (Get-Date $PreviousKey)).Minutes)               
+                        $TimeTicksHasPast = ((Get-Date $NewKey) - (Get-Date $PreviousKey)).Minutes
+                        for ($i = 0; $i -lt $TimeTicksHasPast; $i++) {
+                            $xArray += (Get-Date $NextTimeSlot -Format "ddd dd/MM/yyy HH:mm")
+                            $yArray += 0
+                            $NextTimeSlot = (Get-Date $NextTimeSlot).AddMinutes(1)
+                        }
+                    }
+		    	}
+		    	"Months" {
+		    		"Months not implemented yet"
+		    	}
+		    	"Seconds" {
+		    		"Seconds not implemented yet"
+		    	}
+		    	"Years" {
+		    		"Years not implemented yet"
+		    	}
+		    	default {
+		    		"Default is not implemented yet"
+		    	}
+		    }
+            if ($NewKey -eq $PreviousKey) {
+               Write-Debug ("Found same timestamp: " + $NewKey + ". Adding "+$DataHash[$OriginalKey].Value+" to previous key")
+               $yArray[$PreviousIndex] += $DataHash[$OriginalKey].Value
+               $LastWasNew = $false
+            } else {
+                $LastWasNew = $true
+
+			# Write-Debug "-----"
+			# Write-Debug ("Key: "+$_)
+			# Write-Debug ("Label: "+$DataHash[$_].Label)
+            # Write-Debug ("Value: " + $DataHash[$_].Value)
+              $xArray += [string]$NewKey
+              Write-Debug ("First instance timestamp: " + $NewKey + ". Value found was: " + $DataHash[$OriginalKey].Value)
+              $yArray += $DataHash[$OriginalKey].Value
+              $PreviousIndex = ($yArray.count -1)
+              # $xyArray.Add($NewKey, $DataHash[$OriginalKey].Value)
+              $xyArray.Add($xArray, $yArray)
+            }
+            Write-Debug ("Value is now: " + $yArray[$PreviousIndex])
+            $PreviousKey = $NewKey
+        }
 		
+        Write-Debug ("X-Axis: " + $xArray)
+        Write-Debug ("Y-Axis: " + $yArray)
 
         [void][Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms") 
         [void][Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms.DataVisualization")
@@ -177,9 +211,8 @@ A link here
         
         # add data to chart 
         [void]$Chart.Series.Add("Data") 
-        $Chart.Series["Data"].Points.DataBindXY($xyArray.Keys, $xyArray.Values)
-        
-        
+        $Chart.Series["Data"].Points.DataBindXY($xArray, $yArray)
+        # $Chart.Series["Data"].Points.DataBindXY($xyArray.Keys, $xyArray.Values)
         
         # display the chart on a form 
         $Chart.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right -bor 
