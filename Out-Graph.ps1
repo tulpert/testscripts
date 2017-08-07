@@ -1,15 +1,40 @@
 ﻿#Function Out-Graph {
+<#
+
+.SYNOPSIS
+This is a Out pipeline which creates a Graph from two input sets. Input can also be an Object containing two values. If more values exists, only the first two will be used.
+
+.DESCRIPTION
+More detailed description here
+
+.EXAMPLE
+Get-Eventlog -Logname System -Newest 10 | Out-Graph
+
+.NOTES
+Put some notes here.
+
+.LINK
+A link here
+
+#>
+
 
     Param (
-        [parameter(ValueFromPipeline=$True)] [PSObject]$InputObject,
+        [parameter(Mandatory=$False, ValueFromPipeline=$True)] [PSObject]$InputObject,
         $xArray = $false,
         $yArray = $false,
         $xyArray = $false,
+		[ValidateSet("Auto", "Days", "Hours", "Minutes", "Months", "Seconds", "Weeks", "Years")][String]$TimeLine = $false,
         $Title = $false
     )
     
     Begin {
-        $Debug = $true
+		if ($PSBoundParameters['Debug']) {
+		    $DebugPreference = 'Continue'
+        	$Debug = $true
+		} else {
+			$Debug = $false
+		}
         $DataHash = New-Object hashtable
         $MultipleWarning = @()
     }
@@ -35,10 +60,8 @@
 
                 # Now populate the DataHash
                 if ( ($DataHash.Count -gt 0) -and ($DataHash.ContainsKey($xValue)) ) {
-                    # Write-Warning ("Key [" + $xValue + "] is registered multiple times. Results may be inaccurate. Please verify input values.")
                     $DataHash[$xValue]["Value"] = $DataHash[$xValue]["Value"] + 1
                 } else {
-                    # Write-Host (")))))))>>> " + [string]$xValue)
                     $DataHash.Add([string]$xValue, (New-Object hashtable))
                     $DataHash[$xValue].Add("Value", 1)
                     $DataHash[$xValue].Add("Label", $yValue)
@@ -54,15 +77,85 @@
         $xyArray = @{}
         $DataHash.Count
         $DataHash.Keys | Foreach-Object {
-            if ($Debug) {
-                Write-Host ("--------")
-                Write-Host ("Label: " + $DataHash[$_].Label)
-                Write-Host ("Value: " + $DataHash[$_].Value)
-            }
+			Write-Debug "-----"
+			Write-Debug ("Key: "+$_)
+			Write-Debug ("Label: "+$DataHash[$_].Label)
+            Write-Debug ("Value: " + $DataHash[$_].Value)
             $xArray += $_
             $yArray += $DataHash[$_].Value
             $xyArray.Add($_, $DataHash[$_].Value)
         }
+
+		# If the TimeLine variable is set, detect the first and last date in the x axis
+		$FirstDate = $false
+		$LastDate  = $false
+		$Ticks     = $false
+		if ($TimeLine) {
+			Write-Debug "TimeLine is set. Will determine first and last time slots in x axis"
+			Write-Debug "TimeLine flag is set. Will try to reorganize graph to display data correctly"
+			$tmpSortedKeys = $DataHash.keys | Sort
+
+			$FirstDate = $tmpSortedKeys | Select -First 1
+			$LastDate = $tmpSortedKeys | Select -Last 1
+			$TickResult = ((Get-Date $LastDate) - (Get-Date $FirstDate))
+			if ($PSBoundParameters['Debug']) {
+				$TickResult
+			}
+
+			$OptimalHigh = 300
+			if ($TickResult.TotalDays -gt 1000) {
+				$TimeLine = "Years"
+			} elseif ( $TickResult.TotalDays -gt 140 ) {
+				$TimeLine = "Months"
+			} elseif ( $TickResult.TotalDays -gt 20 ) {
+				$TimeLine = "Weeks"
+			} elseif ( $TickResult.TotalDays -gt 5 ) {
+				$TimeLine = "Days"
+			} elseif ( $TickResult.TotalHours -gt 5 ) {
+				$TimeLine = "Hours"
+			} elseif ( $TickResult.TotalMinutes -gt 5 ) {
+				$TimeLine = "Minutes"
+			} elseif ( $TickResult.TotalSeconds -gt 5 ) {
+				$TimeLine = "Seconds"
+			} elseif ( $TickResult.TotalMilliseconds -gt 5 ) {
+				$TimeLine = "Milliseconds"
+			} else {
+				$TimeLine = "Minutes"
+			}
+
+
+
+			# $LowestDiff = $false
+			# "Days", "Hours", "Minutes", "Seconds", "Milliseconds" | Foreach-Object {
+			# 	$flag = ("Total"+$_)
+			# 	$flag
+			# }
+
+			switch ($TimeLine) {
+				"Days" {
+					"Days not implemented yet"
+				}
+				"Hours" {
+					"Hours not implemented yet"
+				}
+				"Minutes" {
+					"Minutes not implemented yet"
+				}
+				"Months" {
+					"Months not implemented yet"
+				}
+				"Seconds" {
+					"Seconds not implemented yet"
+				}
+				"Years" {
+					"Years not implemented yet"
+				}
+				default {
+					"Default is not implemented yet"
+				}
+			}
+		}
+		
 
         [void][Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms") 
         [void][Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms.DataVisualization")
