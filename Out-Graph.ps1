@@ -24,11 +24,12 @@ A link here
         $xArray = $false,
         $yArray = $false,
         $xyArray = $false,
-		[ValidateSet("Auto", "Days", "Hours", "Minutes", "Months", "Seconds", "Weeks", "Years")][String]$TimeLine = $false,
+		[AllowNull()][ValidateSet("Auto", "Days", "Hours", "Minutes", "Months", "Seconds", "Weeks", "Years")][String]$TimeLine = $null,
         $Title = $false
     )
     
     Begin {
+
 		if ($PSBoundParameters['Debug']) {
 		    $DebugPreference = 'Continue'
         	$Debug = $true
@@ -52,7 +53,7 @@ A link here
                     $yValue = $yValue.SubString(0,($yValue.IndexOf("`n")))
                 }
                 # Also ensure that the field is no longer than maxLength
-                $maxLength = 70
+                $maxLength = 77
                 if ( $yValue.Length -gt $maxlength ) {
                     $yValue = $yValue.Substring(0,$maxlength) + "..."
                 }
@@ -72,40 +73,30 @@ A link here
     }
     End {
         # "End loop"
-        $xArray = @()
-        $yArray = @()
-        $xyArray = @{}
-        $DataHash.Count
-        $DataHash.Keys | Foreach-Object {
-			Write-Debug "-----"
-			Write-Debug ("Key: "+$_)
-			Write-Debug ("Label: "+$DataHash[$_].Label)
-            Write-Debug ("Value: " + $DataHash[$_].Value)
-            $xArray += $_
-            $yArray += $DataHash[$_].Value
-            $xyArray.Add($_, $DataHash[$_].Value)
-        }
 
 		# If the TimeLine variable is set, detect the first and last date in the x axis
-		$FirstDate = $false
-		$LastDate  = $false
-		$Ticks     = $false
-		if ($TimeLine) {
+		$FirstDate  = $false
+		$LastDate   = $false
+		$Ticks      = $false
+        $SortedKeys = $DataHash.Keys | Sort
+
+		if ($TimeLine -eq "Auto"   ) {
 			Write-Debug "TimeLine is set. Will determine first and last time slots in x axis"
 			Write-Debug "TimeLine flag is set. Will try to reorganize graph to display data correctly"
-			$tmpSortedKeys = $DataHash.keys | Sort
 
-			$FirstDate = $tmpSortedKeys | Select -First 1
-			$LastDate = $tmpSortedKeys | Select -Last 1
+			$FirstDate = $SortedKeys | Select -First 1
+			$LastDate  = $SortedKeys | Select -Last 1
+            Write-Debug ("FirstDate: "+ $FirstDate)
+            Write-Debug ("LastDate: " + $LastDate)
 			$TickResult = ((Get-Date $LastDate) - (Get-Date $FirstDate))
 			if ($PSBoundParameters['Debug']) {
 				$TickResult
 			}
 
-			$OptimalHigh = 300
-			if ($TickResult.TotalDays -gt 1000) {
+			$OptimalHigh = 45
+			if ($TickResult.TotalDays -gt (($OptimalHigh / 12) * 365)) {
 				$TimeLine = "Years"
-			} elseif ( $TickResult.TotalDays -gt 140 ) {
+			} elseif ( $TickResult.TotalDays -gt (($OptimalHigh / 7) * 52) ) {
 				$TimeLine = "Months"
 			} elseif ( $TickResult.TotalDays -gt 20 ) {
 				$TimeLine = "Weeks"
@@ -122,37 +113,50 @@ A link here
 			} else {
 				$TimeLine = "Minutes"
 			}
+        }
 
 
 
-			# $LowestDiff = $false
-			# "Days", "Hours", "Minutes", "Seconds", "Milliseconds" | Foreach-Object {
-			# 	$flag = ("Total"+$_)
-			# 	$flag
-			# }
+        $xArray = @()
+        $yArray = @()
+        $xyArray = @{}
+        $SortedKeys  | Foreach-Object {
+			Write-Debug "-----"
+			Write-Debug ("Key: "+$_)
+			Write-Debug ("Label: "+$DataHash[$_].Label)
+            Write-Debug ("Value: " + $DataHash[$_].Value)
+            $xArray += $_
+            $yArray += $DataHash[$_].Value
+            $xyArray.Add($_, $DataHash[$_].Value)
+        }
 
-			switch ($TimeLine) {
-				"Days" {
-					"Days not implemented yet"
-				}
-				"Hours" {
-					"Hours not implemented yet"
-				}
-				"Minutes" {
-					"Minutes not implemented yet"
-				}
-				"Months" {
-					"Months not implemented yet"
-				}
-				"Seconds" {
-					"Seconds not implemented yet"
-				}
-				"Years" {
-					"Years not implemented yet"
-				}
-				default {
-					"Default is not implemented yet"
-				}
+        $tmpDataSet = @{}
+		switch ($TimeLine) {
+			"Days" {
+				"Days not implemented yet"
+			}
+			"Hours" {
+				"Hours not implemented yet"
+			}
+			"Minutes" {
+				"Minutes not implemented yet"
+                $tmpCurrentDateTime = $false
+                $DataHash.keys | % {
+                    $timestamp = Get-Date $_ -Format "ddd dd/MMM/yyyy"
+                    
+                }
+			}
+			"Months" {
+				"Months not implemented yet"
+			}
+			"Seconds" {
+				"Seconds not implemented yet"
+			}
+			"Years" {
+				"Years not implemented yet"
+			}
+			default {
+				"Default is not implemented yet"
 			}
 		}
 		
