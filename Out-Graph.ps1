@@ -27,9 +27,11 @@ A link here
 		[AllowNull()][ValidateSet("Auto", "Days", "Hours", "Minutes", "Months", "Seconds", "Weeks", "Years")][String]$TimeSpan = "Auto",
 		[AllowNull()][ValidateSet("Bar", "Pie", "Line", "3DBar", "3DPie")][String]$Style = $null,
 		[AllowNull()][Switch]$TimeLine,
+		[AllowNull()][Switch]$HideEmpty,
         $Title = $false,
-		$Width = 500,
-		$Height = 400
+		[Int]$Width = 500,
+		[Int]$Height = 400,
+		[Int]$XAxisInterval = 1
     )
     
     Begin {
@@ -145,7 +147,11 @@ A link here
                         $TimeTicksHasPast = ((Get-Date $NewKey) - (Get-Date $PreviousKey)).Days
                         for ($i = 1; $i -lt $TimeTicksHasPast; $i++) {
                             $NextTimeSlot = (Get-Date $PreviousKey).AddDays($i)
-                            $xArray += [string](Get-Date $NextTimeSlot -Format $TimeFormat)
+							if ( $HideEmpty ) {
+								$xArray += ""
+							} else {
+                            	$xArray += [string](Get-Date $NextTimeSlot -Format $TimeFormat)
+							}
                             $yArray += 0
                         }
                     }
@@ -157,7 +163,11 @@ A link here
                         $TimeTicksHasPast = ((Get-Date $NewKey) - (Get-Date $PreviousKey)).Hours
                         for ($i = 1; $i -lt $TimeTicksHasPast; $i++) {
                             $NextTimeSlot = (Get-Date $PreviousKey).AddHours($i)
-                            $xArray += [string](Get-Date $NextTimeSlot -Format $TimeFormat)
+							if ( $HideEmpty ) {
+								$xArray += ""
+							} else {
+                            	$xArray += [string](Get-Date $NextTimeSlot -Format $TimeFormat)
+							}
                             $yArray += 0
                         }
                     }
@@ -169,7 +179,11 @@ A link here
                         $TimeTicksHasPast = ((Get-Date $NewKey) - (Get-Date $PreviousKey)).Minutes
                         for ($i = 1; $i -lt $TimeTicksHasPast; $i++) {
                             $NextTimeSlot = (Get-Date $PreviousKey).AddMinutes($i)
-                            $xArray += [string](Get-Date $NextTimeSlot -Format $TimeFormat)
+							if ( $HideEmpty ) {
+								$xArray += ""
+							} else {
+                            	$xArray += [string](Get-Date $NextTimeSlot -Format $TimeFormat)
+							}
                             $yArray += 0
                         }
                     }
@@ -181,7 +195,11 @@ A link here
                         $TimeTicksHasPast = ((Get-Date $NewKey) - (Get-Date $PreviousKey)).Month
                         for ($i = 1; $i -lt $TimeTicksHasPast; $i++) {
                             $NextTimeSlot = (Get-Date $PreviousKey).AddMonths($i)
-                            $xArray += [string](Get-Date $NextTimeSlot -Format $TimeFormat)
+							if ( $HideEmpty ) {
+								$xArray += ""
+							} else {
+                            	$xArray += [string](Get-Date $NextTimeSlot -Format $TimeFormat)
+							}
                             $yArray += 0
                         }
                     }
@@ -193,7 +211,11 @@ A link here
                         $TimeTicksHasPast = ((Get-Date $NewKey) - (Get-Date $PreviousKey)).Seconds
                         for ($i = 1; $i -lt $TimeTicksHasPast; $i++) {
                             $NextTimeSlot = (Get-Date $PreviousKey).AddSeconds($i)
-                            $xArray += [string](Get-Date $NextTimeSlot -Format $TimeFormat)
+							if ( $HideEmpty ) {
+								$xArray += ""
+							} else {
+                            	$xArray += [string](Get-Date $NextTimeSlot -Format $TimeFormat)
+							}
                             $yArray += 0
                         }
                     }
@@ -206,7 +228,11 @@ A link here
                         $TimeTicksHasPast = ((Get-Date ("01/01/"+$NewKey)) - (Get-Date ("01/01/"+$PreviousKey))).Years
                         for ($i = 1; $i -lt $TimeTicksHasPast; $i++) {
                             $NextTimeSlot = (Get-Date $PreviousKey).AddYears($i)
-                            $xArray += [string](Get-Date $NextTimeSlot -Format $TimeFormat)
+							if ( $HideEmpty ) {
+								$xArray += ""
+							} else {
+                            	$xArray += [string](Get-Date $NextTimeSlot -Format $TimeFormat)
+							}
                             $yArray += 0
                         }
                     }
@@ -248,20 +274,16 @@ A link here
 		$Chart.BackColor = [System.Drawing.Color]::Transparent
         
 
-		#$Chart.ChartAreas[0].AxisX.Minimum = 0;
-		#$Chart.ChartAreas[0].AxisX.Maximum = 100;
-#$Chart.RenderingDpiX = 1200
-#$Chart.RenderingDpiY = 1200
-#$Chart.AutoSize = $True
-#$Chart.AlignDataPointsByAxisLabel() 
-
 
         # create a chartarea to draw on and add to chart 
         $ChartArea = New-Object System.Windows.Forms.DataVisualization.Charting.ChartArea 
+		$ChartArea.Name = "AutoGraph"
+
         $Chart.ChartAreas.Add($ChartArea)
         
         # add data to chart 
         [void]$Chart.Series.Add("Data") 
+
         $Chart.Series["Data"].Points.DataBindXY($xArray, $yArray)
         # $Chart.Series["Data"].Points.DataBindXY($xyArray.Keys, $xyArray.Values)
         
@@ -291,6 +313,10 @@ A link here
 		
 		}
 
+		$Chart.ChartAreas[0].AxisX.Interval=[int]$XAxisInterval
+		$Chart.ChartAreas[0].AxisX.MajorGrid.LineDashStyle = "NotSet"
+		$Chart.ChartAreas[0].AxisY.MajorGrid.LineColor = "LightGray"
+
         # display the chart on a form 
         $Chart.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right -bor 
         [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left 
@@ -302,6 +328,6 @@ A link here
         $Form.Add_Shown({$Form.Activate()}) 
         $Form.ShowDialog()
 
-# $Chart
+   # $Chart
     }
 #}
