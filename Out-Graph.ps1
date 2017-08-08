@@ -92,10 +92,9 @@ A link here
             Write-Debug ("FirstDate: "+ $FirstDate)
             Write-Debug ("LastDate: " + $LastDate)
 			$TickResult = ((Get-Date $LastDate) - (Get-Date $FirstDate))
-            Write-Debug $TickResult
-			if ($PSBoundParameters['Debug']) {
-				$TickResult
-			}
+			# if ($PSBoundParameters['Debug']) {
+			# 	$TickResult
+			# }
 
             if ( $TimeLine -eq "Auto" ) {
 		        $OptimalHigh = 45
@@ -119,6 +118,7 @@ A link here
 		        } else {
 		        	$TimeLine = "Minutes"
 		        }
+				Write-Debug ("Autodetected resolution of: " + $TimeLine)
             }
         }
 
@@ -135,65 +135,97 @@ A link here
 
 		    switch ($TimeLine) {
 		    	"Days" {
-		    		"Days not implemented yet"
+					$TimeFormat = "ddd dd/MMM/yyyy"
+                    $NewKey = Get-Date $OriginalKey -Format $TimeFormat
+                    if ($LastWasNew) {
+                        $TimeTicksHasPast = ((Get-Date $NewKey) - (Get-Date $PreviousKey)).Days
+                        for ($i = 1; $i -lt $TimeTicksHasPast; $i++) {
+                            $NextTimeSlot = (Get-Date $PreviousKey).AddDays($i)
+                            $xArray += [string](Get-Date $NextTimeSlot -Format $TimeFormat)
+                            $yArray += 0
+                        }
+                    }
 		    	}
 		    	"Hours" {
-		    		"Hours not implemented yet"
+					$TimeFormat = "ddd dd/MMM/yyyy HH:00"
+                    $NewKey = Get-Date $OriginalKey -Format $TimeFormat
+                    if ($LastWasNew) {
+                        $TimeTicksHasPast = ((Get-Date $NewKey) - (Get-Date $PreviousKey)).Hours
+                        for ($i = 1; $i -lt $TimeTicksHasPast; $i++) {
+                            $NextTimeSlot = (Get-Date $PreviousKey).AddHours($i)
+                            $xArray += [string](Get-Date $NextTimeSlot -Format $TimeFormat)
+                            $yArray += 0
+                        }
+                    }
 		    	}
 		    	"Minutes" {
-		    		"Minutes - WIP"
-               #     Write-Debug ("OriginalKey: " + $OriginalKey)
-                    $NewKey = Get-Date $OriginalKey -Format "ddd dd/MMM/yyyy HH:mm"
-                    $NextTimeSlot = (Get-Date $NewKey).AddMinutes(1)
-                    # Write-Debug ("Next Timeslot: " + $NextTimeSlot)
-               #     Write-Debug ("Timestamp: " + $NewKey)
+					$TimeFormat = "ddd dd/MMM/yyyy HH:mm"
+                    $NewKey = Get-Date $OriginalKey -Format $TimeFormat
                     if ($LastWasNew) {
-         Write-Host -foregroundcolor green ("Diff between last: " + ((Get-Date $NewKey) - (Get-Date $PreviousKey)).Minutes)               
                         $TimeTicksHasPast = ((Get-Date $NewKey) - (Get-Date $PreviousKey)).Minutes
-                        for ($i = 0; $i -lt $TimeTicksHasPast; $i++) {
-                            $xArray += (Get-Date $NextTimeSlot -Format "ddd dd/MM/yyy HH:mm")
+                        for ($i = 1; $i -lt $TimeTicksHasPast; $i++) {
+                            $NextTimeSlot = (Get-Date $PreviousKey).AddMinutes($i)
+                            $xArray += [string](Get-Date $NextTimeSlot -Format $TimeFormat)
                             $yArray += 0
-                            $NextTimeSlot = (Get-Date $NextTimeSlot).AddMinutes(1)
                         }
                     }
 		    	}
 		    	"Months" {
-		    		"Months not implemented yet"
+					$TimeFormat = "MMM yyyy"
+                    $NewKey = Get-Date $OriginalKey -Format $TimeFormat
+                    if ($LastWasNew) {
+                        $TimeTicksHasPast = ((Get-Date $NewKey) - (Get-Date $PreviousKey)).Month
+                        for ($i = 1; $i -lt $TimeTicksHasPast; $i++) {
+                            $NextTimeSlot = (Get-Date $PreviousKey).AddMonths($i)
+                            $xArray += [string](Get-Date $NextTimeSlot -Format $TimeFormat)
+                            $yArray += 0
+                        }
+                    }
 		    	}
 		    	"Seconds" {
-		    		"Seconds not implemented yet"
+					$TimeFormat = "ddd dd/MMM/yyyy HH:mm:ss"
+                    $NewKey = Get-Date $OriginalKey -Format $TimeFormat
+                    if ($LastWasNew) {
+                        $TimeTicksHasPast = ((Get-Date $NewKey) - (Get-Date $PreviousKey)).Seconds
+                        for ($i = 1; $i -lt $TimeTicksHasPast; $i++) {
+                            $NextTimeSlot = (Get-Date $PreviousKey).AddSeconds($i)
+                            $xArray += [string](Get-Date $NextTimeSlot -Format $TimeFormat)
+                            $yArray += 0
+                        }
+                    }
 		    	}
 		    	"Years" {
-		    		"Years not implemented yet"
+					Write-Warning ("Year function has not been tested properly. Please verify results manually")
+					$TimeFormat = "yyyy"
+                    $NewKey = Get-Date $OriginalKey -Format $TimeFormat
+                    if ($LastWasNew) {
+                        $TimeTicksHasPast = ((Get-Date ("01/01/"+$NewKey)) - (Get-Date ("01/01/"+$PreviousKey))).Years
+                        for ($i = 1; $i -lt $TimeTicksHasPast; $i++) {
+                            $NextTimeSlot = (Get-Date $PreviousKey).AddYears($i)
+                            $xArray += [string](Get-Date $NextTimeSlot -Format $TimeFormat)
+                            $yArray += 0
+                        }
+                    }
 		    	}
 		    	default {
 		    		"Default is not implemented yet"
 		    	}
 		    }
             if ($NewKey -eq $PreviousKey) {
-               Write-Debug ("Found same timestamp: " + $NewKey + ". Adding "+$DataHash[$OriginalKey].Value+" to previous key")
                $yArray[$PreviousIndex] += $DataHash[$OriginalKey].Value
                $LastWasNew = $false
             } else {
                 $LastWasNew = $true
 
-			# Write-Debug "-----"
-			# Write-Debug ("Key: "+$_)
-			# Write-Debug ("Label: "+$DataHash[$_].Label)
-            # Write-Debug ("Value: " + $DataHash[$_].Value)
               $xArray += [string]$NewKey
-              Write-Debug ("First instance timestamp: " + $NewKey + ". Value found was: " + $DataHash[$OriginalKey].Value)
               $yArray += $DataHash[$OriginalKey].Value
               $PreviousIndex = ($yArray.count -1)
-              # $xyArray.Add($NewKey, $DataHash[$OriginalKey].Value)
               $xyArray.Add($xArray, $yArray)
             }
-            Write-Debug ("Value is now: " + $yArray[$PreviousIndex])
             $PreviousKey = $NewKey
         }
 		
-        Write-Debug ("X-Axis: " + $xArray)
-        Write-Debug ("Y-Axis: " + $yArray)
+
 
         [void][Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms") 
         [void][Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms.DataVisualization")
