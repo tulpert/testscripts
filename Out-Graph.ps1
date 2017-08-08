@@ -24,8 +24,9 @@ A link here
         $xArray = $false,
         $yArray = $false,
         $xyArray = $false,
-		[AllowNull()][ValidateSet("Auto", "Days", "Hours", "Minutes", "Months", "Seconds", "Weeks", "Years")][String]$TimeLine = $null,
+		[AllowNull()][ValidateSet("Auto", "Days", "Hours", "Minutes", "Months", "Seconds", "Weeks", "Years")][String]$TimeSpan = "Auto",
 		[AllowNull()][ValidateSet("Bar", "Pie", "Line", "3DBar", "3DPie")][String]$Style = $null,
+		[AllowNull()][Switch]$TimeLine,
         $Title = $false,
 		$Width = 500,
 		$Height = 400
@@ -33,8 +34,8 @@ A link here
     
     Begin {
 
-        if ($TimeLine.length -eq 0) {
-            Remove-Variable TimeLine
+        if ($TimeSpan.length -eq 0) {
+            Remove-Variable TimeSpan
         }
 
 		if ($PSBoundParameters['Debug']) {
@@ -80,15 +81,15 @@ A link here
     End {
         # "End loop"
 
-		# If the TimeLine variable is set, detect the first and last date in the x axis
+		# If the TimeSpan variable is set, detect the first and last date in the x axis
 		$FirstDate  = $false
 		$LastDate   = $false
 		$Ticks      = $false
         $SortedKeys = $DataHash.Keys | Sort
 
-		if ( $TimeLine ) {
-			Write-Debug "TimeLine is set. Will determine first and last time slots in x axis"
-			Write-Debug "TimeLine flag is set. Will try to reorganize graph to display data correctly"
+		if ( $TimeSpan ) {
+			Write-Debug "TimeSpan is set. Will determine first and last time slots in x axis"
+			Write-Debug "TimeSpan flag is set. Will try to reorganize graph to display data correctly"
 
 			$FirstDate = $SortedKeys | Select -First 1
 			$LastDate  = $SortedKeys | Select -Last 1
@@ -99,31 +100,31 @@ A link here
 			# 	$TickResult
 			# }
 
-            if ( $TimeLine -eq "Auto" ) {
+            if ( $TimeSpan -eq "Auto" ) {
 		        $OptimalHigh = 45
 
 		        if ($TickResult.TotalDays -gt (($OptimalHigh / 12) * 365)) {
-		        	$TimeLine = "Years"
+		        	$TimeSpan = "Years"
 		        } elseif ( $TickResult.TotalDays -gt (($OptimalHigh / 7) * 52) ) {
-		        	$TimeLine = "Months"
+		        	$TimeSpan = "Months"
 		        } elseif ( $TickResult.TotalDays -gt 20 ) {
-		        	$TimeLine = "Weeks"
+		        	$TimeSpan = "Weeks"
 		        } elseif ( $TickResult.TotalDays -gt 5 ) {
-		        	$TimeLine = "Days"
+		        	$TimeSpan = "Days"
 		        } elseif ( $TickResult.TotalHours -gt 5 ) {
-		        	$TimeLine = "Hours"
+		        	$TimeSpan = "Hours"
 		        } elseif ( $TickResult.TotalMinutes -gt 5 ) {
-		        	$TimeLine = "Minutes"
+		        	$TimeSpan = "Minutes"
 		        } elseif ( $TickResult.TotalSeconds -gt 5 ) {
-		        	$TimeLine = "Seconds"
+		        	$TimeSpan = "Seconds"
 		        } elseif ( $TickResult.TotalMilliseconds -gt 5 ) {
-		        	$TimeLine = "Milliseconds"
+		        	$TimeSpan = "Milliseconds"
 		        } else {
-		        	$TimeLine = "Minutes"
+		        	$TimeSpan = "Minutes"
 		        }
-				Write-Debug ("Autodetected resolution of: " + $TimeLine)
+				Write-Debug ("Autodetected resolution of: " + $TimeSpan)
             }
-        }
+		}
 
 
 
@@ -136,7 +137,7 @@ A link here
         $SortedKeys  | Foreach-Object {
             $OriginalKey = $_
 
-		    switch ($TimeLine) {
+		    switch ($TimeSpan) {
 		    	"Days" {
 					$TimeFormat = "ddd dd/MMM/yyyy"
                     $NewKey = Get-Date $OriginalKey -Format $TimeFormat
@@ -214,16 +215,19 @@ A link here
 		    		"Default is not implemented yet"
 		    	}
 		    }
+
             if ($NewKey -eq $PreviousKey) {
                $yArray[$PreviousIndex] += $DataHash[$OriginalKey].Value
-               $LastWasNew = $false
+            	$LastWasNew = $false
             } else {
-                $LastWasNew = $true
+				if ($TimeLine) {
+                	$LastWasNew = $true
+				}
 
-              $xArray += [string]$NewKey
-              $yArray += $DataHash[$OriginalKey].Value
-              $PreviousIndex = ($yArray.count -1)
-              $xyArray.Add($xArray, $yArray)
+              	$xArray += [string]$NewKey
+              	$yArray += $DataHash[$OriginalKey].Value
+              	$PreviousIndex = ($yArray.count -1)
+              	$xyArray.Add($xArray, $yArray)
             }
             $PreviousKey = $NewKey
         }
