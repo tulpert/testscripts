@@ -25,7 +25,10 @@ A link here
         $yArray = $false,
         $xyArray = $false,
 		[AllowNull()][ValidateSet("Auto", "Days", "Hours", "Minutes", "Months", "Seconds", "Weeks", "Years")][String]$TimeLine = $null,
-        $Title = $false
+		[AllowNull()][ValidateSet("Bar", "Pie", "Line", "3DBar", "3DPie")][String]$Style = $null,
+        $Title = $false,
+		$Width = 500,
+		$Height = 400
     )
     
     Begin {
@@ -231,12 +234,24 @@ A link here
         [void][Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms.DataVisualization")
         
         # create chart object 
+		$LeftMargin = 20
+		$TopMargin = 30
         $Chart = New-object System.Windows.Forms.DataVisualization.Charting.Chart 
-        $Chart.Width = 500 
-        $Chart.Height = 400 
-        $Chart.Left = 40 
-        $Chart.Top = 30
+        $Chart.Width = $Width
+        $Chart.Height = $Height
+        $Chart.Left = $LeftMargin	 
+        $Chart.Top = ($TopMargin /2)
+		$Chart.BackColor = [System.Drawing.Color]::Transparent
         
+
+		#$Chart.ChartAreas[0].AxisX.Minimum = 0;
+		#$Chart.ChartAreas[0].AxisX.Maximum = 100;
+#$Chart.RenderingDpiX = 1200
+#$Chart.RenderingDpiY = 1200
+#$Chart.AutoSize = $True
+#$Chart.AlignDataPointsByAxisLabel() 
+
+
         # create a chartarea to draw on and add to chart 
         $ChartArea = New-Object System.Windows.Forms.DataVisualization.Charting.ChartArea 
         $Chart.ChartAreas.Add($ChartArea)
@@ -246,16 +261,43 @@ A link here
         $Chart.Series["Data"].Points.DataBindXY($xArray, $yArray)
         # $Chart.Series["Data"].Points.DataBindXY($xyArray.Keys, $xyArray.Values)
         
+		if ($Style) {
+		
+			Switch ($Style) {
+				"Line" {
+					$Chart.Series["Data"].ChartType = [System.Windows.Forms.DataVisualization.Charting.SeriesChartType]::Line
+				}
+				"3DBar" {
+		  			$Chart.Series["Data"]["DrawingStyle"] = "Cylinder"
+				}
+				"Pie" {
+					$Chart.Series["Data"].ChartType = [System.Windows.Forms.DataVisualization.Charting.SeriesChartType]::Pie
+				}
+				"3DPie" {
+					$Chart.Series["Data"].ChartType = [System.Windows.Forms.DataVisualization.Charting.SeriesChartType]::Pie
+					$Chart.Series["Data"]["PieLabelStyle"] = "Outside" 
+					$Chart.Series["Data"]["PieLineColor"] = "Black" 
+					$Chart.Series["Data"]["PieDrawingStyle"] = "Concave" 
+					# ($Chart.Series["Data"].Points.FindMaxByValue())["Exploded"] = $true
+				}
+				default {
+					# Default is standard bar chart
+				}
+			}
+		
+		}
+
         # display the chart on a form 
         $Chart.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right -bor 
         [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left 
         $Form = New-Object Windows.Forms.Form 
         $Form.Text = "PowerShell Chart" 
-        $Form.Width = 600 
-        $Form.Height = 600 
+        $Form.Width = ($Width + ($LeftMargin *2))
+        $Form.Height = ($Height + ($TopMargin * 2))
         $Form.controls.add($Chart) 
         $Form.Add_Shown({$Form.Activate()}) 
         $Form.ShowDialog()
 
+# $Chart
     }
 #}
