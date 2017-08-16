@@ -6,7 +6,7 @@
 # 2.1: Create Subnet
 # 3: Create Public IP address (if applicable)
 # 4: Create NIC
-        # 5: Create Network Security Group (NSG)
+# 5: Create Network Security Group (NSG)
 # 6: Create Virtual Machine
 # Next steps: 
 # * Encrypting disks
@@ -20,118 +20,115 @@ Function New-AzureIaaSEnvironment {
          [String]$SystemName,
          [ValidateSet("northeurope", "westeurope")][String]$Location,
          [String]$TwoCharacterSystemName,
-         [Boolean]$Prompt = $true
+         [Switch]$Prompt
     )
 
 
-    Begin {
-        # 
-        # First some sanity checks of the parameters
-        #
-        if ( $SystemName ) {
-            if ( $SystemName.length -lt 2 ) {
-                 Write-Error ("SystemName is to short. Must be atleast 2 letters long.")
-                 Return
-            }
-            $LCSystemName = $SystemName.ToLower()
+    # 
+    # First some sanity checks of the parameters
+    #
+    if ( $SystemName ) {
+        if ( $SystemName.length -lt 2 ) {
+             Write-Error ("SystemName is to short. Must be atleast 2 letters long.")
+             Return
         }
-        if ( ! $SystemName ) {
-            Write-Error ("SystemName must be specified. Cannot continue.")
+        $LCSystemName = $SystemName.ToLower()
+    }
+    if ( ! $SystemName ) {
+        Write-Error ("SystemName must be specified. Cannot continue.")
+        Return
+    }
+    if ( ! $Location ) {
+        Write-Error ("Location must be specified. Cannot continue.")
+        Return
+    }
+
+    if ( ! $TwoCharacterSystemName ) {
+        $TwoCharacterSystemName = $LCSystemName.substring(0,2)
+    }
+    if ( $TwoCharacterSystemName ) {
+        if ( $TwoCharacterSystemName.length -ne 2 ) {
+            Write-Error ("TwoCharacterSystemName must be a string of two (2) characters only.")
             Return
         }
-        if ( ! $Location ) {
-            Write-Error ("Location must be specified. Cannot continue.")
-            Return
-        }
+    } else {}
 
-        if ( ! $TwoCharacterSystemName ) {
-            $TwoCharacterSystemName = $LCSystemName.substring(0,2)
-        }
-        if ( $TwoCharacterSystemName ) {
-            if ( $TwoCharacterSystemName.length -ne 2 ) {
-                Write-Error ("TwoCharacterSystemName must be a string of two (2) characters only.")
-                Return
-            }
-        } else {}
-
-        #
-        # Retrieve some production data from Azure, prompting login if needed.
-        #
-        Try {
+    #
+    # Retrieve some production data from Azure, prompting login if needed.
+    #
+    Try {
+       $AZResources = Get-AzureRmResource
+    } Catch {
+       $tmpException = $_.Exception
+       if ( $tmpException -match "Run Login-AzureRmAccount to login." ) {
+           Login-AzureRmAccount
            $AZResources = Get-AzureRmResource
-        } Catch {
-           $tmpException = $_.Exception
-           if ( $tmpException -match "Run Login-AzureRmAccount to login." ) {
-               Login-AzureRmAccount
-               $AZResources = Get-AzureRmResource
-           } else {
-               Write-Error ($tmpException)
-               Return
-           }
-           Remove-Variable tmpException
+       } else {
+           Write-Error ($tmpException)
+           Return
+       }
+       Remove-Variable tmpException
+    }
+
+    if (! $AZResources) {
+        Write-Warning ("Could not successfully connect to Azure.")
+        return
+    }
+
+    #
+    # We should now be succesfully connected to Azure
+    #
+
+    # Try to determine the next free VirtualNetwork address spaces
+    # Keep in mind that this may change if someone adds a VirtualNetwork at the same time
+    $VirtualNetworks = Get-AzureRmVirtualNetwork
+    $UsedVirtualNetworkCIDRs = $VirtualNetworks | % { $_.AddressSpace }
+    for ( $i=0; $i -lt 255; $i++ ) {
+        $tmpCIDR = "10.$i.0.0/16"
+        if ( $tmpCIDR -notin $UsedVirtualNetworkCIDRs.AddressPrefixes ) {
+            $FreeVirtualNetworkCIDR = $tmpCIDR
+            $FreeVirtualNetworkSubnetCIDR = "10.$i.0.0/24"
+            $i = 9999
         }
+        Remove-Variable tmpCIDR
+    }
 
-        if (! $AZResources) {
-            Write-Warning ("Could not successfully connect to Azure.")
-            return
-        }
+    # Produce an error if no available subnets were found
+    if ( ( ! $FreeVirtualNetworkCIDR ) -or ( ! $FreeVirtualNetworkSubnetCIDR ) ) {
+        Write-Error ("Could not locate an available subnet range for service.")
+        Return
+    }
+    
+    # Write-Debug ("Found new CIDR range: " + $FreeVirtualNetworkCIDR )
 
-        #
-        # We should now be succesfully connected to Azure
-        #
+    
 
-        # Try to determine the next free VirtualNetwork address spaces
-        # Keep in mind that this may change if someone adds a VirtualNetwork at the same time
-        $VirtualNetworks = Get-AzureRmVirtualNetwork
-        $UsedVirtualNetworkCIDRs = $VirtualNetworks | % { $_.AddressSpace }
-        for ( $i=0; $i -lt 255; $i++ ) {
-            $tmpCIDR = "10.$i.0.0/16"
-            if ( $tmpCIDR -notin $UsedVirtualNetworkCIDRs.AddressPrefixes ) {
-                $FreeVirtualNetworkCIDR = $tmpCIDR
-                $FreeVirtualNetworkSubnetCIDR = "10.$i.0.0/24"
-                $i = 9999
-            }
-            Remove-Variable tmpCIDR
-        }
+    $RGName = "rg-"+$LCSystemName
+    $NSGName    = "nsg-"+$LCSystemName
+    $VNetName = "net-"+$LCSystemName
+    $SubNetName = $VNetName + "-subnet-"+$LCSystemName
+    $PlaceHolder = "<--- FILL IN HERE --->"
 
-        # Produce an error if no available subnets were found
-        if ( ( ! $FreeVirtualNetworkCIDR ) -or ( ! $FreeVirtualNetworkSubnetCIDR ) ) {
-            Write-Error ("Could not locate an available subnet range for service.")
-            Return
-        }
-        
-        # Write-Debug ("Found new CIDR range: " + $FreeVirtualNetworkCIDR )
+    #
+    # Check that no current NGS or RG or Vnet exists with the same name
+    #
+    if ( $RGName -in ($AZResources.ResourceGroupName.tolower() | Get-Unique) ) {
+        Write-Error ("A ResourceGroup by that name already exists: " + $RGName)
+        Return 
+    }
+    # These do not matter. Two NSGs and VNets can have the same name as long as they are in separate ResourceGroups
+    # if ( $NSGName -in (($azresource | ? -Property ResourceType -Contains "Microsoft.Network/networkSecurityGroups").name) )  {
+    #     Write-Error ("A NetworkSecurityGroup by that name already exists: " + $NSGName)
+    #     Return
+    # }
+    # if ( $VNetName -in (($azresource | ? -Property ResourceType -Contains "Microsoft.Network/virtualNetworks").name) )  {
+    # if ( $VNetName -in () ) {
+    #     Write-Error ("A Virtual Network by that name already exists: " + $VNetName)
+    #     Return 
+    # }
 
-        
-
-        $RGName = "rg-"+$LCSystemName
-        $NSGName    = "nsg-"+$LCSystemName
-        $VNetName = "net-"+$LCSystemName
-        $SubNetName = $VNetName + "-subnet-"+$LCSystemName
-        $PlaceHolder = "<--- FILL IN HERE --->"
-
-        #
-        # Check that no current NGS or RG or Vnet exists with the same name
-        #
-        Write-Host  -ForegroundColor Green ($RGName)
-        Write-Host  -ForegroundColor Green (($AZResources.ResourceGroupName.tolower() | Get-Unique))
-        if ( $RGName -in ($AZResources.ResourceGroupName.tolower() | Get-Unique) ) {
-            Write-Error ("A ResourceGroup by that name already exists: " + $RGName)
-            Return
-        }
-        # These do not matter. Two NSGs and VNets can have the same name as long as they are in separate ResourceGroups
-        # if ( $NSGName -in (($azresource | ? -Property ResourceType -Contains "Microsoft.Network/networkSecurityGroups").name) )  {
-        #     Write-Error ("A NetworkSecurityGroup by that name already exists: " + $NSGName)
-        #     Return
-        # }
-        # if ( $VNetName -in (($azresource | ? -Property ResourceType -Contains "Microsoft.Network/virtualNetworks").name) )  {
-        # if ( $VNetName -in () ) {
-        #     Write-Error ("A Virtual Network by that name already exists: " + $VNetName)
-        #     Return 
-        # }
-
-        if ( $Prompt ) {
-            Write-Host ("This will continue to create a new environment based on the following: `
+    if ( $Prompt ) {
+        Write-Host ("This will continue to create a new environment based on the following: `
 Systemname              : " + $SystemName + " (" + $TwoCharacterSystemName + ")`
 Location                : " + $Location + "`
 NetworkSecurityGroup    : " + $NSGName + "`
@@ -140,18 +137,19 @@ Virtual Network Range   : " + $FreeVirtualNetworkCIDR + "`
 Subnet Name             : " + $SubNetName + "`
 Subnet Range            : " + $FreeVirtualNetworkSubnetCIDR)
 
-            [String]$ContinueYN = ""
-            while ( ($ContinueYN.toLower() -notcontains "y") -and ($ContinueYN.toLower() -notcontains "n") ) {
-                $ContinueYN = Read-Host -Prompt "Do you want to continue (y/N)"
-            
-            } 
-            if ( ! $ContinueYN.toLower -match "y" ) { Return }
-            
-        }
-        Return
+        [String]$ContinueYN = ""
+        while ( ($ContinueYN.toLower() -notcontains "y") -and ($ContinueYN.toLower() -notcontains "n") ) {
+            $ContinueYN = Read-Host -Prompt "Do you want to continue (y/N)"
+        
+        } 
+        if ( ! $ContinueYN.toLower -match "y" ) { Return }
+        
     }
-
     
+    #
+    # 1: Create Resource Group
+    # 
+    $newRG = New-AzureRmResourceGroup -Name $RGName -Location $Location
     
 #    #
 #    # Check that 1-6 does not already exist
