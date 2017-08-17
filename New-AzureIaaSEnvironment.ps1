@@ -30,17 +30,17 @@ Function New-AzureIaaSEnvironment {
     if ( $SystemName ) {
         if ( $SystemName.length -lt 2 ) {
              Write-Error ("SystemName is to short. Must be atleast 2 letters long.")
-             Return
+             Break
         }
         $LCSystemName = $SystemName.ToLower()
     }
     if ( ! $SystemName ) {
         Write-Error ("SystemName must be specified. Cannot continue.")
-        Return
+        Break
     }
     if ( ! $Location ) {
         Write-Error ("Location must be specified. Cannot continue.")
-        Return
+        Break
     }
 
     if ( ! $TwoCharacterSystemName ) {
@@ -49,7 +49,7 @@ Function New-AzureIaaSEnvironment {
     if ( $TwoCharacterSystemName ) {
         if ( $TwoCharacterSystemName.length -ne 2 ) {
             Write-Error ("TwoCharacterSystemName must be a string of two (2) characters only.")
-            Return
+            Break
         }
     } else {}
 
@@ -65,7 +65,7 @@ Function New-AzureIaaSEnvironment {
            $AZResources = Get-AzureRmResource
        } else {
            Write-Error ($tmpException)
-           Return
+           Break
        }
        Remove-Variable tmpException
     }
@@ -78,6 +78,7 @@ Function New-AzureIaaSEnvironment {
     #
     # We should now be succesfully connected to Azure
     #
+    $AZResourceGroups = Get-AzureRmResourceGroup
 
     # Try to determine the next free VirtualNetwork address spaces
     # Keep in mind that this may change if someone adds a VirtualNetwork at the same time
@@ -96,7 +97,7 @@ Function New-AzureIaaSEnvironment {
     # Produce an error if no available subnets were found
     if ( ( ! $FreeVirtualNetworkCIDR ) -or ( ! $FreeVirtualNetworkSubnetCIDR ) ) {
         Write-Error ("Could not locate an available subnet range for service.")
-        Return
+        Break
     }
     
     # Write-Debug ("Found new CIDR range: " + $FreeVirtualNetworkCIDR )
@@ -112,9 +113,9 @@ Function New-AzureIaaSEnvironment {
     #
     # Check that no current NGS or RG or Vnet exists with the same name
     #
-    if ( $RGName -in ($AZResources.ResourceGroupName.tolower() | Get-Unique) ) {
+    if ( $RGName -in ($AZResourceGroups.ResourceGroupName.tolower() | Get-Unique) ) {
         Write-Error ("A ResourceGroup by that name already exists: " + $RGName)
-        Return 
+        Break 
     }
     # These do not matter. Two NSGs and VNets can have the same name as long as they are in separate ResourceGroups
     # if ( $NSGName -in (($azresource | ? -Property ResourceType -Contains "Microsoft.Network/networkSecurityGroups").name) )  {
@@ -135,59 +136,46 @@ NetworkSecurityGroup    : " + $NSGName + "`
 Virtual Network Name    : " + $VNetName + "`
 Virtual Network Range   : " + $FreeVirtualNetworkCIDR + "`
 Subnet Name             : " + $SubNetName + "`
-Subnet Range            : " + $FreeVirtualNetworkSubnetCIDR)
+Subnet Range            : " + $FreeVirtualNetworkSubnetCIDR + "")
 
         [String]$ContinueYN = ""
         while ( ($ContinueYN.toLower() -notcontains "y") -and ($ContinueYN.toLower() -notcontains "n") ) {
             $ContinueYN = Read-Host -Prompt "Do you want to continue (y/N)"
         
         } 
-        if ( ! $ContinueYN.toLower -match "y" ) { Return }
+        if ( $ContinueYN.toLower() -notmatch "y" ) { 
+            Break 
+        }
         
     }
+
+    "-------------- THIS SHOULD NOT HAPPEN ON n -------------------"
     
     #
     # 1: Create Resource Group
     # 
+    Write-Host -ForegroundColor green ("Creating Resource Group")
+    Write-Host -ForegroundColor green ("Sleeping to allow for ctrl-c")
+    Sleep 2
+    Write-Host -ForegroundColor green ("Finished sleeping")
     $newRG = New-AzureRmResourceGroup -Name $RGName -Location $Location
-    
-#    #
-#    # Check that 1-6 does not already exist
-#    #
-#    
-#    
-#    #
-#    # 1: Create Resource Group
-#    #
-#    #
-#    # This command is relatively quick
-#    New-AzureRmResourceGroup -Name RGName -Location $Location
-#    
-#    #
-#    # 2: Create Virtual Network
-#    #
-#    #
-#    New-AzureRmVirtualNetwork -Name "net-puppet" -ResourceGroupName "rg-puppet" -Location "northeurope" -AddressPrefix 10.0.0.0/16
-#    
-#    #
-#    # 2.1: Create subnet
-#    #
-#    $tmpVNET = Get-AzureRmVirtualNetwork -Name "net-puppet" -ResourceGroupName "rg-puppet"
-#    Add-AzureRmVirtualNetworkSubnetConfig -VirtualNetwork $tmpVNET -Name "subnet-puppet-net-puppet" -AddressPrefix "10.0.0.0/24"
-#    Set-AzureRmVirtualNetwork -VirtualNetwork $tmpVNET
-#    if ($tmpVNET) {
-#        Remove-Variable tmpVNET
-#    }
-#    
-#    
-#    # 
-#    # 3: Create Public IP Address
-#    #
-#    $pubip = New-AzureRmPublicIpAddress -Name "publicip-puppetmaster" -ResourceGroupName "rg-puppet" -Location "northeurope" -AllocationMethod Dynamic
-#    if ($pubip)  {
-#        Remove-Variable pubip
-#    }
-#    
+
+    #
+    # 2: Create Virtual Network
+    #
+    Write-Host -ForegroundColor green ("Creating Virtual Network")
+    $NewVNet = New-AzureRmVirtualNetwork -Name $VNetName -ResourceGroupName $RGName -Location $Location -AddressPrefix $FreeVirtualNetworkCIDR
+
+    #
+    # 3: Create Virtual Network Subnet
+    Write-Host -ForegroundColor green ("Creating Subnet")
+    $tmpOutput = Add-AzureRmVirtualNetworkSubnetConfig -VirtualNetwork $NewVNet -Name $SubNetName -AddressPrefix $FreeVirtualNetworkSubnetCIDR
+    $tmpOutput = Set-AzureRmVirtualNetwork -VirtualNetwork $NewVNET
+    if ($NewVNet) {
+        Remove-Variable NewVNet
+    }
+
+
 #    #
 #    # 4: Create NIC
 #    # 
@@ -226,3 +214,41 @@ Subnet Range            : " + $FreeVirtualNetworkSubnetCIDR)
 #    # https://docs.microsoft.com/en-us/azure/virtual-machines/windows/tutorial-manage-vm
 }
 
+    
+#    #
+#    # Check that 1-6 does not already exist
+#    #
+#    
+#    
+#    #
+#    # 1: Create Resource Group
+#    #
+#    #
+#    # This command is relatively quick
+#    New-AzureRmResourceGroup -Name RGName -Location $Location
+#    
+#    #
+#    # 2: Create Virtual Network
+#    #
+#    #
+#    New-AzureRmVirtualNetwork -Name "net-puppet" -ResourceGroupName "rg-puppet" -Location "northeurope" -AddressPrefix 10.0.0.0/16
+#    
+#    #
+#    # 2.1: Create subnet
+#    #
+#    $tmpVNET = Get-AzureRmVirtualNetwork -Name "net-puppet" -ResourceGroupName "rg-puppet"
+#    Add-AzureRmVirtualNetworkSubnetConfig -VirtualNetwork $tmpVNET -Name "subnet-puppet-net-puppet" -AddressPrefix "10.0.0.0/24"
+#    Set-AzureRmVirtualNetwork -VirtualNetwork $tmpVNET
+#    if ($tmpVNET) {
+#        Remove-Variable tmpVNET
+#    }
+#    
+#    
+#    # 
+#    # 3: Create Public IP Address
+#    #
+#    $pubip = New-AzureRmPublicIpAddress -Name "publicip-puppetmaster" -ResourceGroupName "rg-puppet" -Location "northeurope" -AllocationMethod Dynamic
+#    if ($pubip)  {
+#        Remove-Variable pubip
+#    }
+#    
