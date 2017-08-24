@@ -17,12 +17,15 @@ Function New-AzureIaaSEnvironment {
     # 0: Set the default values and create variables
     #
     Param (
-         [String]$SystemName,
-         [ValidateSet("northeurope", "westeurope")][String]$Location,
-         [String]$TwoCharacterSystemName,
-         [Switch]$Prompt
+        [String]$SystemName,
+        [ValidateSet("northeurope", "westeurope")][String]$Location,
+        [String]$TwoCharacterSystemName,
+        [String]$Spoke,
+        [Switch]$Prompt
     )
 
+
+    $AllowedLocations = @{"westeurope" = "weu"; "northeurope" = "neu"}
 
     # 
     # First some sanity checks of the parameters
@@ -38,9 +41,24 @@ Function New-AzureIaaSEnvironment {
         Write-Error ("SystemName must be specified. Cannot continue.")
         Break
     }
-    if ( ! $Location ) {
-        Write-Error ("Location must be specified. Cannot continue.")
+
+    if ( ! $Spoke ) {
+        Write-Error ("Spoke must be specified. Cannot continue.")
         Break
+    }
+
+    if ( ! $Location ) {
+        $LocationHash = $AllowedLocations
+    } else {
+        if ( $AllowedLocations.ContainsKey($Location) ) {
+            $LocationHash = @{$Location = $AllowedLocations[$Location]}
+        } else {
+            Write-Error ("Location is not a part of AllowedLocations: " + $AllowedLocations)
+            Write-Host -ForegroundColor Red ($AllowedLocations)
+            break
+            # Write-Debug ($AllowedLocations)
+        }
+
     }
 
     if ( ! $TwoCharacterSystemName ) {
@@ -75,40 +93,70 @@ Function New-AzureIaaSEnvironment {
         return
     }
 
+    $AZVirtualNetworks = Get-AzureRmVirtualNetwork
+
+    if ( $Spoke ) {
+        if ( $Spoke.ToLower() -notin $AZVirtualNetworks.Name ) {
+            Write-Error ("A spoke with that name does not exist. Must quit.")
+            break
+        }
+        
+    } else {
+        Write-Error ("Spoke must be specified and must exist.")
+        break
+    }
+
     #
     # We should now be succesfully connected to Azure
     #
     $AZResourceGroups = Get-AzureRmResourceGroup
 
-    # Try to determine the next free VirtualNetwork address spaces
-    # Keep in mind that this may change if someone adds a VirtualNetwork at the same time
-    $VirtualNetworks = Get-AzureRmVirtualNetwork
-    $UsedVirtualNetworkCIDRs = $VirtualNetworks | % { $_.AddressSpace }
-    for ( $i=0; $i -lt 255; $i++ ) {
-        $tmpCIDR = "10.$i.0.0/16"
-        if ( $tmpCIDR -notin $UsedVirtualNetworkCIDRs.AddressPrefixes ) {
-            $FreeVirtualNetworkCIDR = $tmpCIDR
-            $FreeVirtualNetworkSubnetCIDR = "10.$i.0.0/24"
-            $i = 9999
-        }
-        Remove-Variable tmpCIDR
-    }
 
-    # Produce an error if no available subnets were found
-    if ( ( ! $FreeVirtualNetworkCIDR ) -or ( ! $FreeVirtualNetworkSubnetCIDR ) ) {
-        Write-Error ("Could not locate an available subnet range for service.")
-        Break
+    # Run through the locationhash and generate all metadata for creation of new subnets
+    $CreateHash = @{}
+    $LocationHash.Keys | % {
+        $CreateHash.Add($_, @{})
+        $CreateHash[$_].Add("subnetname", "t-"+$LocationHash[$_]+"-"+$LCSystemName+"-subnet")
+        $CreateHash[$_].Add("nsg", $CreateHash[$_].subnetname + "-nsg")
+
     }
+    $CreateHash
+$createhash["northeurope"].subnetname
+$createhash["northeurope"].nsg
+    Break
+    # Try to determine the next free VirtualNetwork subnet address spaces
+    
+
+    # # Try to determine the next free VirtualNetwork address spaces
+    # # Keep in mind that this may change if someone adds a VirtualNetwork at the same time
+    # $VirtualNetworks = Get-AzureRmVirtualNetwork
+    # $UsedVirtualNetworkCIDRs = $VirtualNetworks | % { $_.AddressSpace }
+    # for ( $i=10; $i -lt 255; $i++ ) {
+    #     $tmpCIDR = "10.$i.0.0/16"
+    #     if ( $tmpCIDR -notin $UsedVirtualNetworkCIDRs.AddressPrefixes ) {
+    #         $FreeVirtualNetworkCIDR = $tmpCIDR
+    #         $FreeVirtualNetworkSubnetCIDR = "10.$i.0.0/24"
+    #         $i = 9999
+    #     }
+    #     Remove-Variable tmpCIDR
+    # }
+
+#     # Produce an error if no available subnets were found
+#     if ( ( ! $FreeVirtualNetworkCIDR ) -or ( ! $FreeVirtualNetworkSubnetCIDR ) ) {
+#         Write-Error ("Could not locate an available subnet range for service.")
+#                 Break
+#    }
     
     # Write-Debug ("Found new CIDR range: " + $FreeVirtualNetworkCIDR )
 
     
 
-    $RGName = "rg-"+$LCSystemName
-    $NSGName    = "nsg-"+$LCSystemName
-    $VNetName = "net-"+$LCSystemName
-    $SubNetName = $VNetName + "-subnet-"+$LCSystemName
-    $PlaceHolder = "<--- FILL IN HERE --->"
+    $RGName         = $LCSystemName+"-rg"
+    $NSGName        = $LCSystemName+"-nsg"
+    $VNetName       = $Spoke
+    $VNetNetwork    = ($AZVirtualNetworks | ? -Property Name -contains $Spoke) #  | Select AddressSpace).AddressSpace.AddressPrefixes
+    $SubNetName     = $VNetName + "-subnet"
+    $PlaceHolder    = "<--- FILL IN HERE --->"
 
     #
     # Check that no current NGS or RG or Vnet exists with the same name
@@ -129,12 +177,18 @@ Function New-AzureIaaSEnvironment {
     # }
 
     if ( $Prompt ) {
+        $LocationOutput = ""
+        $LocationHash.Keys | % {
+            $LocationOutput = $LocationOutput + ", " + ($_)
+        }
+        $LocationOutput = $LocationOutput -Replace "^,\s*", ""
         Write-Host ("This will continue to create a new environment based on the following: `
 Systemname              : " + $SystemName + " (" + $TwoCharacterSystemName + ")`
-Location                : " + $Location + "`
+ResourceGroupName       : " + $RGName + "`
+Location                : " + $LocationOutput + "`
 NetworkSecurityGroup    : " + $NSGName + "`
 Virtual Network Name    : " + $VNetName + "`
-Virtual Network Range   : " + $FreeVirtualNetworkCIDR + "`
+Virtual Network Range   : " + ($VNetNetwork | Select AddressSpace).AddressSpace.AddressPrefixes + "`
 Subnet Name             : " + $SubNetName + "`
 Subnet Range            : " + $FreeVirtualNetworkSubnetCIDR + "")
 
@@ -150,6 +204,7 @@ Subnet Range            : " + $FreeVirtualNetworkSubnetCIDR + "")
     }
 
     "-------------- THIS SHOULD NOT HAPPEN ON n -------------------"
+break
     
     #
     # 1: Create Resource Group
