@@ -24,8 +24,18 @@ Function New-AzureIaaSEnvironment {
         [Switch]$Prompt
     )
 
+    # Load defaults
+    $tmp = (Get-Variable PSCommandPath ).Value -Split "\\"
+    $DefaultsPath = $tmp[0] 
+    for ($i = 1; $i -lt ($tmp.length -1) ; $i++) {
+        $DefaultsPath += "`\" + $tmp[$i]
+    }
+    $DefaultsPath += "`\Get-AzureDefaults.ps1"
+    . $DefaultsPath
+    Remove-Variable tmp
 
-    $AllowedLocations = @{"westeurope" = "weu"; "northeurope" = "neu"}
+
+    # $AllowedLocations = @{"westeurope" = "weu"; "northeurope" = "neu"}
 
     # 
     # First some sanity checks of the parameters
@@ -89,7 +99,7 @@ Function New-AzureIaaSEnvironment {
     }
 
     if (! $AZResources) {
-        Write-Warning ("Could not successfully connect to Azure.")
+        Write-Warning ("Could not successfully connect to Azure, or Azure subscription is empty of resources.")
         return
     }
 
@@ -121,8 +131,6 @@ Function New-AzureIaaSEnvironment {
 
     }
     $CreateHash
-$createhash["northeurope"].subnetname
-$createhash["northeurope"].nsg
     Break
     # Try to determine the next free VirtualNetwork subnet address spaces
     
