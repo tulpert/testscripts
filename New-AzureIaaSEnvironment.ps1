@@ -1,15 +1,10 @@
 #
 # Steps: 
 # 
-# 1: Create Resource Group
-# 2: Create Virtual Network
-# 2.1: Create Subnet
-# 3: Create Public IP address (if applicable)
-# 4: Create NIC
-# 5: Create Network Security Group (NSG)
-# 6: Create Virtual Machine
-# Next steps: 
-# * Encrypting disks
+# Create Resource Group     (if doesn't exist)
+# Create Virtual Network    (if doesn't exist)
+# Create Subnet             
+#  - with size "normal" /24, "small" /25 or "minimum" /26
     
     
 Function New-AzureIaaSEnvironment {
@@ -17,11 +12,17 @@ Function New-AzureIaaSEnvironment {
     # 0: Set the default values and create variables
     #
     Param (
-        [String]$SystemName,
+        [String]$VNet,
+        [String]$ResourceGroupName,
         [ValidateSet("northeurope", "westeurope")][String]$Location,
-        [String]$TwoCharacterSystemName,
-        [String]$Spoke,
-        [Switch]$Prompt
+        [ValidateSet("normal", "small", "minimum")][String]$SubnetSize = "normal",
+#        [String]$AddressSpace,
+        [String]$SubnetAddressRange,
+        [Switch]$Debug,
+        [ValidateSet("prod", "uat", "test")][String]$Environment = "uat",
+        [Switch]$WhatIf,
+        [Switch]$Verbose,
+        [Switch]$Force
     )
 
     # Load defaults
@@ -34,26 +35,38 @@ Function New-AzureIaaSEnvironment {
     . $DefaultsPath
     Remove-Variable tmp
 
+    # 
+    # Check that the defaults are loaded as expected
+    #
+    if ( ! $AllowedLocations ) {
+        Write-Error ("Could not load defaults [" + $DefaultsPath + "]. Cannot continue.")
+        Break
+    }
+    Remove-Variable DefaultsPath
 
-    # $AllowedLocations = @{"westeurope" = "weu"; "northeurope" = "neu"}
+    #
+    # Set resourcegroup location to first instance of the AllowedLocations variable from defaults
+    # if not specified as a variable
+    #
+    # ToDo: set this as random location???
+    #
+    if ( ! $RGLocation ) {
+        $RGLocation = ($AllowedLocations.GetEnumerator() | Select -First 1).Name
+    }
+
 
     # 
     # First some sanity checks of the parameters
     #
-    if ( $SystemName ) {
-        if ( $SystemName.length -lt 2 ) {
-             Write-Error ("SystemName is to short. Must be atleast 2 letters long.")
+    if ( $VNet ) {
+        if ( $VNet.length -lt 2 ) {
+             Write-Error ("VNet name is to short. Must be atleast 2 letters long.")
              Break
         }
-        $LCSystemName = $SystemName.ToLower()
+        $LCVNet = $VNet.ToLower()
     }
-    if ( ! $SystemName ) {
-        Write-Error ("SystemName must be specified. Cannot continue.")
-        Break
-    }
-
-    if ( ! $Spoke ) {
-        Write-Error ("Spoke must be specified. Cannot continue.")
+    if ( ! $VNet ) {
+        Write-Error ("VNet name must be specified. Cannot continue.")
         Break
     }
 
@@ -66,30 +79,22 @@ Function New-AzureIaaSEnvironment {
             Write-Error ("Location is not a part of AllowedLocations: " + $AllowedLocations)
             Write-Host -ForegroundColor Red ($AllowedLocations)
             break
-            # Write-Debug ($AllowedLocations)
         }
 
     }
-
-    if ( ! $TwoCharacterSystemName ) {
-        $TwoCharacterSystemName = $LCSystemName.substring(0,2)
-    }
-    if ( $TwoCharacterSystemName ) {
-        if ( $TwoCharacterSystemName.length -ne 2 ) {
-            Write-Error ("TwoCharacterSystemName must be a string of two (2) characters only.")
-            Break
-        }
-    } else {}
 
     #
     # Retrieve some production data from Azure, prompting login if needed.
     #
     Try {
+        If ( $Debug ) {
+            Write-Debug -Message "Retrieving Azure Resources..."
+        }
        $AZResources = Get-AzureRmResource
     } Catch {
        $tmpException = $_.Exception
        if ( $tmpException -match "Run Login-AzureRmAccount to login." ) {
-           Login-AzureRmAccount
+           Login-AzureRmAccount -SubscriptionID $AllowedEnvironment[$Environment]
            $AZResources = Get-AzureRmResource
        } else {
            Write-Error ($tmpException)
@@ -99,219 +104,255 @@ Function New-AzureIaaSEnvironment {
     }
 
     if (! $AZResources) {
-        Write-Warning ("Could not successfully connect to Azure, or Azure subscription is empty of resources.")
-        return
-    }
-
-    $AZVirtualNetworks = Get-AzureRmVirtualNetwork
-
-    if ( $Spoke ) {
-        if ( $Spoke.ToLower() -notin $AZVirtualNetworks.Name ) {
-            Write-Error ("A spoke with that name does not exist. Must quit.")
-            break
+        # AZResources might be non-existent because no resources exist. Check subscriptions...
+        if ( (Get-AzureRMSubscription)) {
+            if ( $Debug ) {
+                Write-Debug -Message "Azure resources are empty. We will continue and create brand new ones."
+            }
+        } else {
+            Write-Warning ("Could not successfully connect to Azure, or Azure subscription is empty of resources.")
+            Break
         }
-        
-    } else {
-        Write-Error ("Spoke must be specified and must exist.")
-        break
     }
 
     #
     # We should now be succesfully connected to Azure
     #
+    $VirtualNetworks = Get-AzureRmVirtualNetwork
+
+    #
+    # Check if VNet is specified and contains the mandatory "-net" suffix
+    #
+    if ( $VNet ) {
+        if ( $VNet.ToLower().EndsWith($DefaultVNetEnding) ) {
+            $LCVNetName = $VNet.ToLower()
+            $VNet = $VNet.TrimEnd($DefaultVNetEnding)
+        } else {
+            $LCVNetName = $VNet.ToLower() + $DefaultVNetEnding
+        }
+        if ( $LCVNetName -in $VirtualNetworks.Name ) {
+            Write-Error ("A VNet with that name ["+$LCVNetName+"] already exists. Cannot continue.")
+            break
+        }
+        $SubNetName = $VNet.ToLower() + $DefaultSubnetEnding
+    }
+    $LCSystemName = $VNet.ToLower()
+
+    # Check if ResourceGroup is given as a variable. Else create one
+    if ( $ResourceGroupName)  {
+        if ( $ResourceGroupName.ToLower().EndsWith($DefaultRGEnding) ) {
+            $LCRGName = $ResourceGroupName.ToLower()
+        } else {
+            $LCRGName = $ResourceGroupName.ToLower() + $DefaultRGEnding
+        }
+        if ( $LCRGName.length -lt 2 ) {
+            Write-Error ("ResourceGroupName is to short.")
+            Break
+        }
+    } else {
+        $LCRGName = $LCSystemName + $DefaultRGEnding
+    }
+
+    #
+    # Now check if RGName exists already
+    #
     $AZResourceGroups = Get-AzureRmResourceGroup
+    $InfoMessage = "------`n"
+    if ( $LCRGName -notin $AZResourceGroups.ResourceGroupName) {
+        $NewRG = $True
+        $InfoMessage += "Creating new ResourceGroup     : "
+    } else {
+        $InfoMessage += "Using existing ResourceGroup   : "
+    }
 
+    $InfoMessage += $LCRGName + "`n"
 
-    # Run through the locationhash and generate all metadata for creation of new subnets
+    $UsedVirtualNetworkCIDRs = $VirtualNetworks | % { $_.AddressSpace }
     $CreateHash = @{}
     $LocationHash.Keys | % {
         $CreateHash.Add($_, @{})
         $CreateHash[$_].Add("subnetname", "t-"+$LocationHash[$_]+"-"+$LCSystemName+"-subnet")
         $CreateHash[$_].Add("nsg", $CreateHash[$_].subnetname + "-nsg")
 
-    }
-    $CreateHash
-    Break
-    # Try to determine the next free VirtualNetwork subnet address spaces
-    
 
-    # # Try to determine the next free VirtualNetwork address spaces
-    # # Keep in mind that this may change if someone adds a VirtualNetwork at the same time
-    # $VirtualNetworks = Get-AzureRmVirtualNetwork
-    # $UsedVirtualNetworkCIDRs = $VirtualNetworks | % { $_.AddressSpace }
-    # for ( $i=10; $i -lt 255; $i++ ) {
-    #     $tmpCIDR = "10.$i.0.0/16"
-    #     if ( $tmpCIDR -notin $UsedVirtualNetworkCIDRs.AddressPrefixes ) {
-    #         $FreeVirtualNetworkCIDR = $tmpCIDR
-    #         $FreeVirtualNetworkSubnetCIDR = "10.$i.0.0/24"
-    #         $i = 9999
-    #     }
-    #     Remove-Variable tmpCIDR
-    # }
 
-#     # Produce an error if no available subnets were found
-#     if ( ( ! $FreeVirtualNetworkCIDR ) -or ( ! $FreeVirtualNetworkSubnetCIDR ) ) {
-#         Write-Error ("Could not locate an available subnet range for service.")
-#                 Break
-#    }
-    
-    # Write-Debug ("Found new CIDR range: " + $FreeVirtualNetworkCIDR )
-
-    
-
-    $RGName         = $LCSystemName+"-rg"
-    $NSGName        = $LCSystemName+"-nsg"
-    $VNetName       = $Spoke
-    $VNetNetwork    = ($AZVirtualNetworks | ? -Property Name -contains $Spoke) #  | Select AddressSpace).AddressSpace.AddressPrefixes
-    $SubNetName     = $VNetName + "-subnet"
-    $PlaceHolder    = "<--- FILL IN HERE --->"
-
-    #
-    # Check that no current NGS or RG or Vnet exists with the same name
-    #
-    if ( $RGName -in ($AZResourceGroups.ResourceGroupName.tolower() | Get-Unique) ) {
-        Write-Error ("A ResourceGroup by that name already exists: " + $RGName)
-        Break 
-    }
-    # These do not matter. Two NSGs and VNets can have the same name as long as they are in separate ResourceGroups
-    # if ( $NSGName -in (($azresource | ? -Property ResourceType -Contains "Microsoft.Network/networkSecurityGroups").name) )  {
-    #     Write-Error ("A NetworkSecurityGroup by that name already exists: " + $NSGName)
-    #     Return
-    # }
-    # if ( $VNetName -in (($azresource | ? -Property ResourceType -Contains "Microsoft.Network/virtualNetworks").name) )  {
-    # if ( $VNetName -in () ) {
-    #     Write-Error ("A Virtual Network by that name already exists: " + $VNetName)
-    #     Return 
-    # }
-
-    if ( $Prompt ) {
-        $LocationOutput = ""
-        $LocationHash.Keys | % {
-            $LocationOutput = $LocationOutput + ", " + ($_)
-        }
-        $LocationOutput = $LocationOutput -Replace "^,\s*", ""
-        Write-Host ("This will continue to create a new environment based on the following: `
-Systemname              : " + $SystemName + " (" + $TwoCharacterSystemName + ")`
-ResourceGroupName       : " + $RGName + "`
-Location                : " + $LocationOutput + "`
-NetworkSecurityGroup    : " + $NSGName + "`
-Virtual Network Name    : " + $VNetName + "`
-Virtual Network Range   : " + ($VNetNetwork | Select AddressSpace).AddressSpace.AddressPrefixes + "`
-Subnet Name             : " + $SubNetName + "`
-Subnet Range            : " + $FreeVirtualNetworkSubnetCIDR + "")
-
-        [String]$ContinueYN = ""
-        while ( ($ContinueYN.toLower() -notcontains "y") -and ($ContinueYN.toLower() -notcontains "n") ) {
-            $ContinueYN = Read-Host -Prompt "Do you want to continue (y/N)"
+        $LCNSG       = $LCSystemName + $DefaultNSGEnding
+        # Try to determine the next free VirtualNetwork subnet address spaces
         
-        } 
-        if ( $ContinueYN.toLower() -notmatch "y" ) { 
-            Break 
+        if ( $AddressSpace ) {
+            # This should only be used as a manual commandline creation of new VNet
+            # when you are absolutely sure the VNet is not already in use. 
+            # Otherwise it will fail
+            Write-Error ("Input of manual subnet CIDR is not implemented yet. Cannot continue.")
+            Break
+        } else {
+            # Try to determine the next free VirtualNetwork address spaces
+            # Keep in mind that this may change if someone adds a VirtualNetwork at the same time
+            # $VirtualNetworks = Get-AzureRmVirtualNetwork
+            for ( $i=10; $i -lt 240; $i++ ) {
+                $tmpCIDR = "10.$i.0.0/16"
+                if ( $tmpCIDR -notin $UsedVirtualNetworkCIDRs.AddressPrefixes ) {
+                    $tmpObj = New-Object -TypeName Microsoft.Azure.Commands.Network.Models.PSAddressSpace
+                    $tmpObj.AddressPrefixes = $tmpCIDR
+                    if ( ! $UsedVirtualNetworkCIDRs ) {
+                        $UsedVirtualNetworkCIDRs = @()
+                    }
+                    $UsedVirtualNetworkCIDRs += $tmpObj 
+                    Remove-Variable tmpObj
+                    $FreeVirtualNetworkCIDR = $tmpCIDR
+                    $FreeVirtualNetworkSubnetCIDR = "10.$i.0.0/24"
+                    $i = 9999
+                }
+                Remove-Variable tmpCIDR
+            }
         }
-        
+
+        # Produce an error if no available subnets were found
+        if ( ( ! $FreeVirtualNetworkCIDR ) -or ( ! $FreeVirtualNetworkSubnetCIDR ) ) {
+            Write-Error ("Could not locate an available subnet range for service.")
+            Break
+        }
+
+        $CreateHash[$_].Add("vnetname", "t-"+$LocationHash[$_]+"-"+$LCVNetName)
+        $CreateHash[$_].Add("vnetcidr", $FreeVirtualNetworkCIDR)
+        $CreateHash[$_].Add("subnetcidr", $FreeVirtualNetworkSubnetCIDR)
+
     }
 
-    "-------------- THIS SHOULD NOT HAPPEN ON n -------------------"
-break
+    $CreateHash.Keys | % {
+        $InfoMessage += "Creating new VNet network ["+$_+"]:
+ New NSG                        : " + $CreateHash[$_]["nsg"] + "`
+ New VNet                       : " + $CreateHash[$_]["vnetname"] + "`
+ New VNetIPCIDR                 : " + $CreateHash[$_]["vnetcidr"] + "`
+  New Subnet                    : " + $CreateHash[$_]["subnetname"] + "`
+  New SubnetIPCIDR              : " + $CreateHash[$_]["subnetcidr"] + "`
+"
+    }
+
+
+    if ( ! $WhatIf ) {
+        if ( ! $Force ) {
+            Write-Host ($InfoMessage)
+
+            [String]$ContinueYN = ""
+            while ( ($ContinueYN.toLower() -notcontains "y") -and ($ContinueYN.toLower() -notcontains "n") ) {
+                $ContinueYN = Read-Host -Prompt "Do you want to continue (y/N)"
+            } 
+            if ( $ContinueYN.toLower() -notmatch "y" ) { 
+                Break 
+            }
+        } else {
+            if ( $Debug ) {
+                Write-Debug -Message $InfoMessage
+            }
+        }
+    }
+    Remove-Variable InfoMessage
+    
+
     
     #
-    # 1: Create Resource Group
+    # 1: Create Resource Group - if not reusing an existing group
     # 
-    Write-Host -ForegroundColor green ("Creating Resource Group")
-    Write-Host -ForegroundColor green ("Sleeping to allow for ctrl-c")
-    Sleep 2
-    Write-Host -ForegroundColor green ("Finished sleeping")
-    $newRG = New-AzureRmResourceGroup -Name $RGName -Location $Location
-
-    #
-    # 2: Create Virtual Network
-    #
-    Write-Host -ForegroundColor green ("Creating Virtual Network")
-    $NewVNet = New-AzureRmVirtualNetwork -Name $VNetName -ResourceGroupName $RGName -Location $Location -AddressPrefix $FreeVirtualNetworkCIDR
-
-    #
-    # 3: Create Virtual Network Subnet
-    Write-Host -ForegroundColor green ("Creating Subnet")
-    $tmpOutput = Add-AzureRmVirtualNetworkSubnetConfig -VirtualNetwork $NewVNet -Name $SubNetName -AddressPrefix $FreeVirtualNetworkSubnetCIDR
-    $tmpOutput = Set-AzureRmVirtualNetwork -VirtualNetwork $NewVNET
-    if ($NewVNet) {
-        Remove-Variable NewVNet
+    if ( $NewRG ) {
+        if ( $Verbose -Or $WhatIf ) {
+            Write-Host -ForegroundColor $whc ($wis + "Creating Resource Group [" + $LCRGName + "] in location [" + $RGLocation + "]")
+        }
+        if ( ! $WhatIf ) {
+            try {
+                $NewRG = New-AzureRmResourceGroup -Name $LCRGName -Location $RGLocation
+            } catch {
+                Write-Error ("Could not successfully create ResourceGroup. Cannot continue.")
+                Break
+            }
+        }
+        Remove-Variable NewRG
+    } else {
+        if ( $WhatIf ) {
+            Write-Host -ForegroundColor $whc ($wis + "Will not create new resource group [" + $LCRGName + "] because it already exists.")
+        }
     }
 
+    
+    # Run through the CreateHash and create VNets and subnets based on the found attributes
+    $CreateHash.Keys | % {
+        $loc = $_
 
-#    #
-#    # 4: Create NIC
-#    # 
-#    $nic = New-AzureRmNetworkInterface -Name "nic-puppetmaster-01" -ResourceGroupName "rg-puppet" -Location "northeurope" -SubnetId (Get-AzureRmVirtualNetworkSubnetConfig -Name "subnet-puppet-net-puppet" -VirtualNetwork (Get-AzureRmVirtualNetwork -Name "net-puppet" -ResourceGroupName "rg-puppet")).id
-#    
-#    
-#    #
-#    # 5: Create Network Security Group
-#    #
-#    #
-#    # This command takes a few seconds
-#    New-AzureRmNetworkSecurityGroup -Name $NSGName -ResourceGroupName $RGName -Location $Location
-#    
-#    #
-#    # 5.1: Create NSG rules
-#    #
-#    # Example with RDP tcp port 3389 inbound
-#    #
-#    $nsg = Get-AzureRmNetworkSecurityGroup -Name $NSGName -ResourceGroupName $RGName 
-#    # $newrule = New-AzureRmNetworkSecurityRuleConfig -Name "AllowRDPInBound" -Protocol Tcp -Direction Inbound -Priority 1000 -SourceAddressPrefix * -SourcePortRange * -DestinationAddressPrefix * -DestinationPortRange 3389 -Access Allow
-#    Add-AzureRmNetworkSecurityRuleConfig -Name "AllowRDPInBound" -Protocol Tcp -Direction Inbound -Priority 1000 -SourceAddressPrefix * -SourcePortRange * -DestinationAddressPrefix * -DestinationPortRange 3389 -Access Allow -NetworkSecurityGroup $nsg
-#    Set-AzureRmNetworkSecurityGroup -NetworkSecurityGroup $nsg
-#    
-#    
-#    #
-#    # 6: Create Virtual Machine
-#    #
-#    $username = tmphakon
-#    $password = "Dette er en test!" | ConvertTo-SecureString
-#    $cred = New-Object -Typename System.Management.Automation.PSCredential -argumentlist $username, $password
-#    $newvm = New-AzureRmVMConfig -VMName "puppet-wintest-01" -VMSize Standard_D1
-#    $newvm = Set-AzureRmVMOperatingSystem -VM $newvm -Windows -ComputerName 
-#    
-#    
-#    # Documentation:
-#    # https://docs.microsoft.com/en-us/azure/virtual-machines/windows/tutorial-manage-vm
+        # 
+        # Check that virtual network does not already exist
+        #
+
+        if ( $CreateHash[$loc]["vnetname"] -notin $VirtualNetworks.Name ) {
+
+            #
+            # 2: Create Virtual Network
+            #
+            Write-Host -ForegroundColor $whc ($wis + "Creating Virtual Network ["+$CreateHash[$loc]["vnetname"]+"] in ["+$loc+"]")
+            if ( ! $WhatIf ) {
+                try {
+                    $NewVNet = New-AzureRmVirtualNetwork -Name $CreateHash[$loc]["vnetname"] -ResourceGroupName $LCRGName -Location $loc -AddressPrefix $CreateHash[$loc]["vnetcidr"]
+                } catch {
+                    Write-Host -ForegroundColor Red ("Error when trying to create VNet VNet [" + $CreateHash[$loc]["vnetname"] + "]. Details: ")
+                    Write-Host -ForegroundColor Red ("VNetname          : " + $CreateHash[$loc]["vnetname"])
+                    Write-Host -ForegroundColor Red ("ResourceGroupName : " + $LCRGName)
+                    Write-Host -ForegroundColor Red ("Location : " + $loc)
+                    Write-Host -ForegroundColor Red ("AddressPrefix : " + $CreateHash[$loc]["vnetcidr"])
+                    Write-Host -ForegroundColor Red ($_.Exception.ItemName)
+                    Write-Host -ForegroundColor Red ($_.Exception.Message)
+                    Write-Host -ForegroundColor Red ($_.Exception.StatusCode)
+                    Write-Host -ForegroundColor Red ($_.Exception.ReasonPhrase)
+                }
+            }
+
+
+            #
+            # 3: Create Virtual Network Gateway Subnet
+            #
+
+            Write-Host -ForegroundColor $whc ($wis + "Creating Subnet [" + $CreateHash[$loc]["subnetname"] + "] in VNet [" + $CreateHash[$loc]["vnetname"] + "]")
+            if ( ! $WhatIf ) {
+                try {
+                    $tmpOutput = Add-AzureRmVirtualNetworkSubnetConfig -VirtualNetwork $NewVNET -Name $CreateHash[$loc]["subnetname"] -AddressPrefix $CreateHash[$loc]["subnetcidr"]
+                    $tmpOutput = Set-AzureRmVirtualNetwork -VirtualNetwork $NewVNET
+                } catch {
+                    Write-Host -ForegroundColor Red ("Error when trying to create Subnet in Vnet VNet [" + $CreateHash[$loc]["vnetname"] + "]. Details: ")
+                    Write-Host -ForegroundColor Red ("Subnetname        : " + $CreateHash[$loc]["subnetname"])
+                    Write-Host -ForegroundColor Red ("ResourceGroupName : " + $LCRGName)
+                    Write-Host -ForegroundColor Red ("Location          : " + $loc)
+                    Write-Host -ForegroundColor Red ("AddressPrefix     : " + $CreateHash[$loc]["subnetcidr"])
+                    Write-Host -ForegroundColor Red ($_.Exception.ItemName)
+                    Write-Host -ForegroundColor Red ($_.Exception.Message)
+                    Write-Host -ForegroundColor Red ($_.Exception.StatusCode)
+                    Write-Host -ForegroundColor Red ($_.Exception.ReasonPhrase)
+                    Write-Host -ForegroundColor Cyan ($_.Exception | Select * )
+                }
+            }
+            if ($NewVNet) {
+                    Remove-Variable NewVNet
+            }
+
+        } else {
+            # The VNet already exists. Find the next suitable subnet according to the criteria 
+            Write-Host -ForegroundColor Red ("Virtual Network VNet [" + $CreateHash[$_]["vnetname"] + "] already exists.")
+        }
+    }
 }
 
-    
-#    #
-#    # Check that 1-6 does not already exist
-#    #
-#    
-#    
-#    #
-#    # 1: Create Resource Group
-#    #
-#    #
-#    # This command is relatively quick
-#    New-AzureRmResourceGroup -Name RGName -Location $Location
-#    
-#    #
-#    # 2: Create Virtual Network
-#    #
-#    #
-#    New-AzureRmVirtualNetwork -Name "net-puppet" -ResourceGroupName "rg-puppet" -Location "northeurope" -AddressPrefix 10.0.0.0/16
-#    
-#    #
-#    # 2.1: Create subnet
-#    #
-#    $tmpVNET = Get-AzureRmVirtualNetwork -Name "net-puppet" -ResourceGroupName "rg-puppet"
-#    Add-AzureRmVirtualNetworkSubnetConfig -VirtualNetwork $tmpVNET -Name "subnet-puppet-net-puppet" -AddressPrefix "10.0.0.0/24"
-#    Set-AzureRmVirtualNetwork -VirtualNetwork $tmpVNET
-#    if ($tmpVNET) {
-#        Remove-Variable tmpVNET
-#    }
-#    
-#    
-#    # 
-#    # 3: Create Public IP Address
-#    #
-#    $pubip = New-AzureRmPublicIpAddress -Name "publicip-puppetmaster" -ResourceGroupName "rg-puppet" -Location "northeurope" -AllocationMethod Dynamic
-#    if ($pubip)  {
-#        Remove-Variable pubip
-#    }
-#    
+# Stuff
+break
+$start = 0 
+$cidr = 27
+$dostuff = 0
+$amplifier = ( ( (256 / ([Convert]::ToInt32(("1"+("0"*((($cidr +1)-24)-1))), 2)))  ))
+$ampiteration = 1
+$checkit = $amplifier * $ampiteration
+for ($i = 0; $i -lt 256; $i++) {
+    if ( $i -eq 0) { 
+            $i 
+    } else {
+        if ( $i -eq ($checkit) ) {
+            $i
+            $checkit += $amplifier
+        }
+    }
+}
