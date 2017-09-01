@@ -10,7 +10,7 @@ $DefaultSubnetEnding    = "-subnet"
 $AllowedLocations       = @{"westeurope" = "weu"; "northeurope" = "neu"; "uksouth" = "uks"}
 $AllowedEnvironments    = @{"prod" = "a115349b-7e1c-4879-9a46-b960faf4b890"; "uat" = "3ec5d7cc-f501-4fc8-a695-386d71f6007e"}
 $EnvironmentShortform   = @{"prod" = "p"; "uat" = "t"}
-$AllowedSubnetCIDRs     = @{"large" = "24"; "big" = "25"; "medium" = "26"; "small" = "27"; "tiny" = "28"; "minimal" = "29"}
+$AllowedSubnetCIDRs     = @{"large" = "24"; "big" = "25"; "medium" = "26"; "small" = "27"; "tiny" = "28"; "minimal" = "29"; "24" = "24"; "25" = "25"; "26" = "26"; "27"= "27"; "28" = "28"; "29" = "29"}
 $LowestNetworkSegment   = 10            # When generating new networks. Do not generate lower than this.
 $HighestNetworkSegment  = 240           # When generating new networks. Do not generate higher than this. 
 

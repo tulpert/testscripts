@@ -78,6 +78,7 @@ Function New-AzureIaaSSubnet {
     #
     $CreateHash = @{}
     $VNet = $VNet.ToLower()
+    $Iterator = ( ( (256 / ([Convert]::ToInt32(("1"+("0"*((([int32]($AllowedSubnetCIDRs[$SubnetSize]) +1)-24)-1))), 2)))  ))
     $LocationHash.Keys | % {
         $ThisLocationShort = $LocationHash[$_]
         if ( $VNet.EndsWith($DefaultVNetEnding) ) {
@@ -105,7 +106,7 @@ Function New-AzureIaaSSubnet {
             # Check if a subnet with the same name exists already
             # That would be bad, m'kay?
             #
-            $NewSubnetName = ($VNetLongName+"-" + $SubnetName + $DefaultSubnetEnding)
+            $NewSubnetName = ($VNetLongName+"-" + $SubnetName + $DefaultSubnetEnding).ToLower()
             if ( $NewSubnetName -in ($CurrentVNet.Subnets.Name)) {
                 Write-Host -ForegroundColor Red ("Subnet with same name already exists in same VNet. Cannot continue.")
                 $CreateHash = $null
@@ -133,30 +134,30 @@ Function New-AzureIaaSSubnet {
                     if ( $MasterPrefixCIDRMask -le $AllowedSubnetCIDRs[$SubnetSize] ) {
                         # We can continue
 
-                        # 
-                        # If the requested subnet is a /24, then just find the next available slot
-                        #
-                        if ( $AllowedSubnetCIDRs[$SubnetSize] -eq 24 ) {
-                            # We will create a C net
-                            for ( $i = $LowestNetworkSegment; $i -lt $HighestNetworkSegment; $i++ ) {
-                                $tmpCIDR = [String]([String]$MasterIPBNet+[String]$i+".0/24")
-                                Write-Verbose ("Testing:  Network segment: " + $tmpCIDR)
+                        for ( $i = $LowestNetworkSegment; $i -lt $HighestNetworkSegment; $i++ ) {
+                            for ( $j = 0; $j -lt 255; $j = $j + $Iterator ) {
+                                $tmpCIDR = [String]([String]$MasterIPBNet+[String]$i+"."+[String]$j+"/"+$AllowedSubnetCIDRs[$SubnetSize])
                                 # Compare the requested network segment to those already taken
                                 if ( (($tmpCIDR) -Replace "\/.*$", "") -notin ( ($UsedVirtualNetworkSubnetCIDRs) -Replace "\/.*$", "") ) {
-                                    Write-Verbose (" - Success - The IP range [" +  $tmpCIDR + "] is available!!!") 
+                                    Write-Verbose (" - Success - The IP range [" +  $tmpCIDR + "] is available !!!") 
                                     $FoundFreeSubnet = $true
 
                                     $CreateHash[$VNetLongName].Add("newsubnet", $tmpCIDR)
                                     $CreateHash[$VNetLongName].Add("newsubnetname", ($VNetLongName+"-" + $SubnetName + $DefaultSubnetEnding))
+                                    $i = $j = 999999
                                     Break
-                                    $i = 999999
                                 } else {
-                                    Write-Verbose ("Requested Network segment [" + $tmpCIDR + "] is not available. Continuing search...")
+                                    # Sjekk hvis CIDR vi sjekker er av annen / enn den vi nå tester. elers sett j til 9999
+                                    $MasterIPxNet = (($tmpCIDR) -Replace "\d+\/\d+$", "" ) # (($tmp[0]) -Replace "\d+$", "")
+                                    if ( ($UsedVirtualNetworkSubnetCIDRs) -match $MasterIPxNet+"\d+\/" + $AllowedSubnetCIDRs[$SubnetSize]) {
+                                        Write-Debug ("Found subnet with same submask, but this range [" + $tmpCIDR + "] is taken. Will check next range.")
+                                    } else {
+                                        Write-Debug ("Subnet taken by different CIDR netmask [" + $tmpCIDR + "]. Will check next C-net.")
+                                        $j = 999999
+                                    
+                                    }
                                 }
                             }
-                            Remove-Variable tmpCIDR
-                        } else {
-                            # We will first try to find an available address slot. If not, delegate a new C-net to this segmentation
                         }
                     } else {
                         Write-Host -ForegroundColor Yellow ("Requested Subnet [/" + $AllowedSubnetCIDRs[$SubnetSize] + "] is larger than the master vnet address space [/" + $MasterPrefixCIDRMask + "]. Trying next address space in vnet (if exists)")
@@ -164,32 +165,6 @@ Function New-AzureIaaSSubnet {
                 }
             }
             Remove-Variable FoundFreeSubnet, AllMasterNets, CurrentVNet, CurrentMasterNet
-
-            # $CurrentSubnets = Get-AzureRMVirtualNetworkSubnetConfig -VirtualNetwork ( $AZVNets | ? -Property Name -Contains $VNetLongName) 
-            # $CurrentSubnets.Name
-            # $CurrentSubnets.AddressPrefix
-
-
-            ### # Try to determine the next free VirtualNetwork address spaces
-            ### # Keep in mind that this may change if someone adds a VirtualNetwork at the same time
-            ### # $VirtualNetworks = Get-AzureRmVirtualNetwork
-            ### for ( $i=10; $i -lt 240; $i++ ) {
-            ###     $tmpCIDR = "10.$i.0.0/16"
-            ###     if ( $tmpCIDR -notin $UsedVirtualNetworkCIDRs.AddressPrefixes ) {
-            ###         $tmpObj = New-Object -TypeName Microsoft.Azure.Commands.Network.Models.PSAddressSpace
-            ###         $tmpObj.AddressPrefixes = $tmpCIDR
-            ###         if ( ! $UsedVirtualNetworkCIDRs ) {
-            ###             $UsedVirtualNetworkCIDRs = @()
-            ###         }
-            ###         $UsedVirtualNetworkCIDRs += $tmpObj 
-            ###         Remove-Variable tmpObj
-            ###         $FreeVirtualNetworkCIDR = $tmpCIDR
-            ###         $FreeVirtualNetworkSubnetCIDR = "10.$i.0.0/24"
-            ###         $i = 9999
-            ###     }
-            ###     Remove-Variable tmpCIDR
-            ### }
-
         } else {
             Write-Host -ForegroundColor Red ("Could not locate VNet [" + $VNetLongName + "]. Cannot create subnet.")
             $KillSmashDestroy = $true
@@ -210,10 +185,10 @@ Function New-AzureIaaSSubnet {
             Write-Host ($InfoMessage)
 
             [String]$ContinueYN = ""
-            while ( ($ContinueYN.toLower() -notcontains "y") -and ($ContinueYN.toLower() -notcontains "n") ) {
+            while ( ($ContinueYN.ToLower() -notcontains "y") -and ($ContinueYN.ToLower() -notcontains "n") ) {
                 $ContinueYN = Read-Host -Prompt "Do you want to continue (y/N)"
             } 
-            if ( $ContinueYN.toLower() -notmatch "y" ) { 
+            if ( $ContinueYN.ToLower() -notmatch "y" ) { 
                 Break 
             }
         } else {
@@ -234,6 +209,7 @@ Function New-AzureIaaSSubnet {
                 try {
                     $tmpOutput = Add-AzureRmVirtualNetworkSubnetConfig -VirtualNetwork $CreateHash[$_]["vnetobject"] -Name $CreateHash[$_]["newsubnetname"] -AddressPrefix $CreateHash[$_]["newsubnet"]
                     $tmpOutput = Set-AzureRmVirtualNetwork -VirtualNetwork $CreateHash[$_]["vnetobject"]
+                    Write-Verbose ("Finished creating subnet [" + $CreateHash[$_]["newsubnetname"] + "]" )
                     Remove-Variable tmpOutput
                 } catch {
                     Write-Host -ForegroundColor Red ($_.Exception.Message)
@@ -313,7 +289,7 @@ Function New-AzureIaaSEnvironment {
         } else {
             Write-Error ("Location is not a part of AllowedLocations: " + $AllowedLocations)
             Write-Host -ForegroundColor Red ($AllowedLocations)
-            break
+            Break
         }
 
     }
@@ -367,7 +343,7 @@ Function New-AzureIaaSEnvironment {
         }
         if ( $LCVNetName -in $VirtualNetworks.Name ) {
             Write-Error ("A VNet with that name ["+$LCVNetName+"] already exists. Cannot continue.")
-            break
+            Break
         }
         $SubNetName = $VNet.ToLower() + $DefaultSubnetEnding
     }
@@ -470,10 +446,10 @@ Function New-AzureIaaSEnvironment {
             Write-Host ($InfoMessage)
 
             [String]$ContinueYN = ""
-            while ( ($ContinueYN.toLower() -notcontains "y") -and ($ContinueYN.toLower() -notcontains "n") ) {
+            while ( ($ContinueYN.ToLower() -notcontains "y") -and ($ContinueYN.ToLower() -notcontains "n") ) {
                 $ContinueYN = Read-Host -Prompt "Do you want to continue (y/N)"
             } 
-            if ( $ContinueYN.toLower() -notmatch "y" ) { 
+            if ( $ContinueYN.ToLower() -notmatch "y" ) { 
                 Break 
             }
         } else {
@@ -574,7 +550,7 @@ Function New-AzureIaaSEnvironment {
 }
 
 # # Stuff
-# break
+# Break
 # $start = 0 
 # $cidr = 27
 # $dostuff = 0
