@@ -6,6 +6,171 @@
 # Create Subnet             
 #  - with size "normal" /24, "small" /25 or "minimum" /26
     
+Function New-AzureIaaSSubnet {
+    Param (
+        [Parameter(Mandatory = $True)][String]$VNet,
+        # [String]$Location,              # If not set, will default to ALL locations
+        [String]$SubnetSize = "large",
+        [String]$Environment = "uat",
+        [Switch]$WhatIf,
+        [Switch]$Force
+    )
+
+    #
+    # Load defaults
+    # 
+    # This code snippet is common to all IaaS scripts
+    #
+    $tmp = (Get-Variable PSCommandPath ).Value -Split "\\"
+    $CommonScriptsPath = $tmp[0] 
+    for ($i = 1; $i -lt ($tmp.length -1) ; $i++) {
+        $CommonScriptsPath += "`\" + $tmp[$i]
+    }
+    $GetDefaultsPath    = ($CommonScriptsPath + "`\Get-AzureDefaults.ps1")
+    $ValidateInputPath  = ($CommonScriptsPath + "`\Validate-AzureIaaSInput.ps1")
+    . $GetDefaultsPath
+    . $ValidateInputPath
+
+    # 
+    # Check that the defaults are loaded as expected
+    #
+    if ( ! $AllowedLocations ) {
+        Write-Error ("Could not load defaults [" + $GetDefaultsPath + "]. Cannot continue.")
+        Break
+    }
+    Remove-Variable tmp, GetDefaultsPath, ValidateInputPath
+
+
+    #
+    # Check if specific location is specified
+    #
+    if ( $Location ) {
+        $LocationHash = @{$Location = $AllowedLocations[$Location]}
+        Write-Host -ForegroundColor Red ("Ability to create subnet on single location is currently prohibited. Will not continue.")
+        Break
+    } else {
+        $LocationHash = $AllowedLocations
+    }
+
+    # Access the Virtual Networks in Azure and store them for further use
+    try {
+        $AZVNets = Get-AzureRMVirtualNetwork
+    } catch {
+        Write-Host -ForegroundColor Red ("Could not retrieve Azure Virtual Networks. Make sure you are logged in and have access to the Azure portal.")
+        Write-Host -ForegroundColor Red ("Error message:`n" + ($_.Exception.Message))
+        Break
+    }
+
+    #
+    # Check to see if we can locate the VNet specified.
+    # 
+    # Keep in mind that the VNet name can be specified in shortform, i.e. "mgmt" or in long form, i.e. "mgmt-net".
+    # The actual name of the subnet will be for example 't-neu-mgmt-net', i.e. '<environment>-<location>-<vnetname>-net'
+    #
+    $CreateHash = @{}
+    $VNet = $VNet.ToLower()
+    $LocationHash.Keys | % {
+        $ThisLocationShort = $LocationHash[$_]
+        if ( $VNet.EndsWith($DefaultVNetEnding) ) {
+            Write-Debug ("vnet is LONG with ending")
+            $VNetLongName = ($EnvironmentShortform[$Environment] + "-" + $ThisLocationShort + "-"+$VNet)
+        } else {
+            $VNetLongName = ($EnvironmentShortform[$Environment] + "-" + $ThisLocationShort + "-"+$VNet+$DefaultVNetEnding)
+        }
+
+        if ( $VNetLongName.ToLower() -in $AZVNets.Name ) {
+            #
+            # VNet is found.
+            # Find the current subnets in this VNET and determine the next logical subnet based on the specified CIDR
+            #
+            $CurrentVNet = $AZVNets | ? -Property Name -Contains $VNetLongName
+            $AllMasterNets = $CurrentVNet.AddressSpace.AddressPrefixes
+            $UsedVirtualNetworkSubnetCIDRs = $CurrentVNet.Subnets.AddressPrefix
+
+            $AllMasterNets | Sort-Object -Descending | % {
+                # The VNet can contain multiple CIDR address prefixes. Loop through all of them
+                if ( ! $FoundFreeSubnet ) {
+                $CurrentMasterNet = $_
+                $tmp = $CurrentMasterNet.Split("/")
+                $MasterPrefixCIDRMask = $tmp[1]
+                $MasterIPBNet = (($tmp[0]) -Replace "\d+\.\d+$", "")
+                
+                #
+                # Check that the subnet we're trying to create is equal or smaller than the master vnet
+                #
+            $UsedVirtualNetworkSubnetCIDRs
+                if ( $MasterPrefixCIDRMask -le $AllowedSubnetCIDRs[$SubnetSize] ) {
+                    # We can continue
+
+                    # 
+                    # If the requested subnet is a /24, then just find the next available slot
+                    #
+                    if ( $AllowedSubnetCIDRs[$SubnetSize] -eq 24 ) {
+                        # We will create a C net
+                        for ( $i = $LowestNetworkSegment; $i -lt $HighestNetworkSegment; $i++ ) {
+                            $tmpCIDR = [String]([String]$MasterIPBNet+[String]$i+".0/24")
+                            Write-Host -ForegroundColor Green ("Trying ---> " + $tmpCIDR)
+                            if ( $tmpCIDR -notin $UsedVirtualNetworkSubnetCIDRs ) {
+                               Write-Host ("This IP range is FREE!!!") 
+                               $FoundFreeSubnet = $true
+                               Break
+                               $i = 999999
+                            }
+                        }
+                        Remove-Variable tmpCIDR
+                    } else {
+                        # We will first try to find an available address slot. If not, delegate a new C-net to this segmentation
+                    }
+                    Write-Host "---- end of loop ----"
+                    Write-Host " "
+                } else {
+                    Write-Host -ForegroundColor Yellow ("Requested Subnet [/" + $AllowedSubnetCIDRs[$SubnetSize] + "] is larger than the master vnet address space [/" + $MasterPrefixCIDRMask + "]. Trying next address space in vnet (if exists)")
+                }
+            #    Write-Host -ForegroundColor Cyan ("MasterNet   --> " + $CurrentMasterNet)
+            #    Write-Host -ForegroundColor Cyan ("CIDRMask    --> " + $MasterPrefixCIDRMask)
+            #    Write-Host -ForegroundColor Cyan ("MasterIPNet --> " + $MasterIPBNet)
+            }
+            }
+            Remove-Variable FoundFreeSubnet, AllMasterNets, CurrentVNet, CurrentMasterNet
+
+            # $CurrentSubnets = Get-AzureRMVirtualNetworkSubnetConfig -VirtualNetwork ( $AZVNets | ? -Property Name -Contains $VNetLongName) 
+            # $CurrentSubnets.Name
+            # $CurrentSubnets.AddressPrefix
+
+
+            ### # Try to determine the next free VirtualNetwork address spaces
+            ### # Keep in mind that this may change if someone adds a VirtualNetwork at the same time
+            ### # $VirtualNetworks = Get-AzureRmVirtualNetwork
+            ### for ( $i=10; $i -lt 240; $i++ ) {
+            ###     $tmpCIDR = "10.$i.0.0/16"
+            ###     if ( $tmpCIDR -notin $UsedVirtualNetworkCIDRs.AddressPrefixes ) {
+            ###         $tmpObj = New-Object -TypeName Microsoft.Azure.Commands.Network.Models.PSAddressSpace
+            ###         $tmpObj.AddressPrefixes = $tmpCIDR
+            ###         if ( ! $UsedVirtualNetworkCIDRs ) {
+            ###             $UsedVirtualNetworkCIDRs = @()
+            ###         }
+            ###         $UsedVirtualNetworkCIDRs += $tmpObj 
+            ###         Remove-Variable tmpObj
+            ###         $FreeVirtualNetworkCIDR = $tmpCIDR
+            ###         $FreeVirtualNetworkSubnetCIDR = "10.$i.0.0/24"
+            ###         $i = 9999
+            ###     }
+            ###     Remove-Variable tmpCIDR
+            ### }
+
+            $CreateHash.Add($VNetLongName, @{})
+            $CreateHash[$VNetLongName].Add("location", $_)
+            $CreateHash[$VNetLongName].Add("locationshort", $ThisLocationShort)
+        } else {
+            Write-Host -ForegroundColor Red ("Could not locate VNet [" + $VNetLongName + "]. Cannot create subnet.")
+            $KillSmashDestroy = $true
+        }
+    }
+
+    if ( $KillSmashDestroy ) {
+        Break
+    }
+}
     
 Function New-AzureIaaSEnvironment {
     #
@@ -15,11 +180,9 @@ Function New-AzureIaaSEnvironment {
         [String]$VNet,
         [String]$ResourceGroupName,
         [ValidateSet("northeurope", "westeurope")][String]$Location,
-        [ValidateSet("normal", "small", "minimum")][String]$SubnetSize = "normal",
-#        [String]$AddressSpace,
-        [String]$SubnetAddressRange,
-        [Switch]$Debug,
+        [ValidateSet("large", "big", "medium", "small", "tiny", "minimal")][String]$SubnetSize = "large",
         [ValidateSet("prod", "uat", "test")][String]$Environment = "uat",
+        [Switch]$Debug,
         [Switch]$WhatIf,
         [Switch]$Verbose,
         [Switch]$Force
@@ -338,21 +501,21 @@ Function New-AzureIaaSEnvironment {
     }
 }
 
-# Stuff
-break
-$start = 0 
-$cidr = 27
-$dostuff = 0
-$amplifier = ( ( (256 / ([Convert]::ToInt32(("1"+("0"*((($cidr +1)-24)-1))), 2)))  ))
-$ampiteration = 1
-$checkit = $amplifier * $ampiteration
-for ($i = 0; $i -lt 256; $i++) {
-    if ( $i -eq 0) { 
-            $i 
-    } else {
-        if ( $i -eq ($checkit) ) {
-            $i
-            $checkit += $amplifier
-        }
-    }
-}
+# # Stuff
+# break
+# $start = 0 
+# $cidr = 27
+# $dostuff = 0
+# $amplifier = ( ( (256 / ([Convert]::ToInt32(("1"+("0"*((($cidr +1)-24)-1))), 2)))  ))
+# $ampiteration = 1
+# $checkit = $amplifier * $ampiteration
+# for ($i = 0; $i -lt 256; $i++) {
+#     if ( $i -eq 0) { 
+#             $i 
+#     } else {
+#         if ( $i -eq ($checkit) ) {
+#             $i
+#             $checkit += $amplifier
+#         }
+#     }
+# }
