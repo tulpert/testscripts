@@ -7,7 +7,15 @@
 #  - with size "normal" /24, "small" /25 or "minimum" /26
     
 Function New-AzureIaaSSubnet {
+    # Todo: 
+    #
+    # * Ensure that all created subnets are in the same number. Currently script will create the first available subnet
+    #   and not worry if it matches subnets in mirrored vnets. Example it should create 10.13.24.0/24 and 10.16.24.0/24 (Same C-net sequence)
+    #   but it may as well create 10.13.24.0/24 and 10.13.64/24 if that is the first available C-net in the second mirror.
+    #
+    #
     Param (
+        [Parameter(Mandatory = $True)][String]$Name,
         [Parameter(Mandatory = $True)][String]$VNet,
         # [String]$Location,              # If not set, will default to ALL locations
         [String]$SubnetSize = "large",
@@ -15,6 +23,7 @@ Function New-AzureIaaSSubnet {
         [Switch]$WhatIf,
         [Switch]$Force
     )
+    $SubnetName = (($Name.ToLower()) -Replace ("-subnet$"), "" )
 
     #
     # Load defaults
@@ -78,58 +87,81 @@ Function New-AzureIaaSSubnet {
             $VNetLongName = ($EnvironmentShortform[$Environment] + "-" + $ThisLocationShort + "-"+$VNet+$DefaultVNetEnding)
         }
 
+
+        Write-Verbose ( " ----- " )
+        Write-Verbose ( "Working on Virtual Network [" + $VNetLongName + "]" )
         if ( $VNetLongName.ToLower() -in $AZVNets.Name ) {
+            $CreateHash.Add($VNetLongName, @{})
+            $CreateHash[$VNetLongName].Add("location", $_)
+            $CreateHash[$VNetLongName].Add("locationshort", $ThisLocationShort)
             #
             # VNet is found.
+            #
             # Find the current subnets in this VNET and determine the next logical subnet based on the specified CIDR
             #
             $CurrentVNet = $AZVNets | ? -Property Name -Contains $VNetLongName
+
+            #
+            # Check if a subnet with the same name exists already
+            # That would be bad, m'kay?
+            #
+            $NewSubnetName = ($VNetLongName+"-" + $SubnetName + $DefaultSubnetEnding)
+            if ( $NewSubnetName -in ($CurrentVNet.Subnets.Name)) {
+                Write-Host -ForegroundColor Red ("Subnet with same name already exists in same VNet. Cannot continue.")
+                $CreateHash = $null
+                $AllMasterNets = $null
+                Break
+            }
+
+
+
+            $CreateHash[$VNetLongName].Add("vnetobject", $CurrentVNet)
             $AllMasterNets = $CurrentVNet.AddressSpace.AddressPrefixes
             $UsedVirtualNetworkSubnetCIDRs = $CurrentVNet.Subnets.AddressPrefix
 
-            $AllMasterNets | Sort-Object -Descending | % {
+            $AllMasterNets | Sort-Object  | % {
                 # The VNet can contain multiple CIDR address prefixes. Loop through all of them
                 if ( ! $FoundFreeSubnet ) {
-                $CurrentMasterNet = $_
-                $tmp = $CurrentMasterNet.Split("/")
-                $MasterPrefixCIDRMask = $tmp[1]
-                $MasterIPBNet = (($tmp[0]) -Replace "\d+\.\d+$", "")
-                
-                #
-                # Check that the subnet we're trying to create is equal or smaller than the master vnet
-                #
-            $UsedVirtualNetworkSubnetCIDRs
-                if ( $MasterPrefixCIDRMask -le $AllowedSubnetCIDRs[$SubnetSize] ) {
-                    # We can continue
-
-                    # 
-                    # If the requested subnet is a /24, then just find the next available slot
+                    $CurrentMasterNet = $_
+                    $tmp = $CurrentMasterNet.Split("/")
+                    $MasterPrefixCIDRMask = $tmp[1]
+                    $MasterIPBNet = (($tmp[0]) -Replace "\d+\.\d+$", "")
+                    
                     #
-                    if ( $AllowedSubnetCIDRs[$SubnetSize] -eq 24 ) {
-                        # We will create a C net
-                        for ( $i = $LowestNetworkSegment; $i -lt $HighestNetworkSegment; $i++ ) {
-                            $tmpCIDR = [String]([String]$MasterIPBNet+[String]$i+".0/24")
-                            Write-Host -ForegroundColor Green ("Trying ---> " + $tmpCIDR)
-                            if ( $tmpCIDR -notin $UsedVirtualNetworkSubnetCIDRs ) {
-                               Write-Host ("This IP range is FREE!!!") 
-                               $FoundFreeSubnet = $true
-                               Break
-                               $i = 999999
+                    # Check that the subnet we're trying to create is equal or smaller than the master vnet
+                    #
+                    if ( $MasterPrefixCIDRMask -le $AllowedSubnetCIDRs[$SubnetSize] ) {
+                        # We can continue
+
+                        # 
+                        # If the requested subnet is a /24, then just find the next available slot
+                        #
+                        if ( $AllowedSubnetCIDRs[$SubnetSize] -eq 24 ) {
+                            # We will create a C net
+                            for ( $i = $LowestNetworkSegment; $i -lt $HighestNetworkSegment; $i++ ) {
+                                $tmpCIDR = [String]([String]$MasterIPBNet+[String]$i+".0/24")
+                                Write-Verbose ("Testing:  Network segment: " + $tmpCIDR)
+                                # Compare the requested network segment to those already taken
+                                if ( (($tmpCIDR) -Replace "\/.*$", "") -notin ( ($UsedVirtualNetworkSubnetCIDRs) -Replace "\/.*$", "") ) {
+                                    Write-Verbose (" - Success - The IP range [" +  $tmpCIDR + "] is available!!!") 
+                                    $FoundFreeSubnet = $true
+
+                                    $CreateHash[$VNetLongName].Add("newsubnet", $tmpCIDR)
+                                    $CreateHash[$VNetLongName].Add("newsubnetname", ($VNetLongName+"-" + $SubnetName + $DefaultSubnetEnding))
+                                    Break
+                                    $i = 999999
+                                } else {
+                                    Write-Verbose ("Requested Network segment [" + $tmpCIDR + "] is not available. Continuing search...")
+                                }
                             }
+                            Remove-Variable tmpCIDR
+                        } else {
+                            # We will first try to find an available address slot. If not, delegate a new C-net to this segmentation
                         }
-                        Remove-Variable tmpCIDR
                     } else {
-                        # We will first try to find an available address slot. If not, delegate a new C-net to this segmentation
+                        Write-Host -ForegroundColor Yellow ("Requested Subnet [/" + $AllowedSubnetCIDRs[$SubnetSize] + "] is larger than the master vnet address space [/" + $MasterPrefixCIDRMask + "]. Trying next address space in vnet (if exists)")
                     }
-                    Write-Host "---- end of loop ----"
-                    Write-Host " "
-                } else {
-                    Write-Host -ForegroundColor Yellow ("Requested Subnet [/" + $AllowedSubnetCIDRs[$SubnetSize] + "] is larger than the master vnet address space [/" + $MasterPrefixCIDRMask + "]. Trying next address space in vnet (if exists)")
                 }
-            #    Write-Host -ForegroundColor Cyan ("MasterNet   --> " + $CurrentMasterNet)
-            #    Write-Host -ForegroundColor Cyan ("CIDRMask    --> " + $MasterPrefixCIDRMask)
-            #    Write-Host -ForegroundColor Cyan ("MasterIPNet --> " + $MasterIPBNet)
-            }
             }
             Remove-Variable FoundFreeSubnet, AllMasterNets, CurrentVNet, CurrentMasterNet
 
@@ -158,9 +190,6 @@ Function New-AzureIaaSSubnet {
             ###     Remove-Variable tmpCIDR
             ### }
 
-            $CreateHash.Add($VNetLongName, @{})
-            $CreateHash[$VNetLongName].Add("location", $_)
-            $CreateHash[$VNetLongName].Add("locationshort", $ThisLocationShort)
         } else {
             Write-Host -ForegroundColor Red ("Could not locate VNet [" + $VNetLongName + "]. Cannot create subnet.")
             $KillSmashDestroy = $true
@@ -170,7 +199,50 @@ Function New-AzureIaaSSubnet {
     if ( $KillSmashDestroy ) {
         Break
     }
+
+    $InfoMessage = "-----`nCreating new subnets: "
+    $CreateHash.Keys | % {
+        $InfoMessage += "`n Subnet [" + $CreateHash[$_]["newsubnetname"] + "] with CIDR [" + $CreateHash[$_]["newsubnet"] + "] will be created in VirtualNetwork [" + $_ + "] at Location [" + $CreateHash[$_]["location"] + "] "
+    }
+
+    if ( ! $WhatIf ) {
+        if ( ! $Force ) {
+            Write-Host ($InfoMessage)
+
+            [String]$ContinueYN = ""
+            while ( ($ContinueYN.toLower() -notcontains "y") -and ($ContinueYN.toLower() -notcontains "n") ) {
+                $ContinueYN = Read-Host -Prompt "Do you want to continue (y/N)"
+            } 
+            if ( $ContinueYN.toLower() -notmatch "y" ) { 
+                Break 
+            }
+        } else {
+            if ( $Debug ) {
+                Write-Debug -Message $InfoMessage
+            }
+        }
+    } else {
+        Write-Host -ForegroundColor $whc ($wis + $InfoMessage)
+        Break
+    }
+    Remove-Variable InfoMessage
+
+    if ( ! $WhatIf ) {
+        if ( $CreateHash ) {
+            $CreateHash.Keys | % {
+                Write-Verbose ("Creating subnet [" +  $CreateHash[$_]["newsubnetname"] + "] with CIDR [" + $CreateHash[$_]["newsubnet"] + "]")
+                try {
+                    $tmpOutput = Add-AzureRmVirtualNetworkSubnetConfig -VirtualNetwork $CreateHash[$_]["vnetobject"] -Name $CreateHash[$_]["newsubnetname"] -AddressPrefix $CreateHash[$_]["newsubnet"]
+                    $tmpOutput = Set-AzureRmVirtualNetwork -VirtualNetwork $CreateHash[$_]["vnetobject"]
+                    Remove-Variable tmpOutput
+                } catch {
+                    Write-Host -ForegroundColor Red ($_.Exception.Message)
+                }
+            }
+        }
+    }
 }
+
     
 Function New-AzureIaaSEnvironment {
     #
