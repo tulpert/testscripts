@@ -18,6 +18,7 @@ Function New-AzureIaaSSubnet {
         [Parameter(Mandatory = $True)][String]$Name,
         [Parameter(Mandatory = $True)][String]$VNet,
         # [String]$Location,              # If not set, will default to ALL locations
+        [int32]$PreferredCNet,
         [String]$SubnetSize = "large",
         [String]$Environment = "uat",
         [Switch]$WhatIf,
@@ -49,6 +50,14 @@ Function New-AzureIaaSSubnet {
     }
     Remove-Variable tmp, GetDefaultsPath, ValidateInputPath
 
+
+    #
+    # If $PreferredCNet is enforced, then do enforce!
+    #
+    if ( $PreferredCNet ) {
+        $LowestNetworkSegment = $PreferredCNet
+        $HighestNetworkSegment = $PreferredCNet
+    }
 
     #
     # Check if specific location is specified
@@ -134,7 +143,7 @@ Function New-AzureIaaSSubnet {
                     if ( $MasterPrefixCIDRMask -le $AllowedSubnetCIDRs[$SubnetSize] ) {
                         # We can continue
 
-                        for ( $i = $LowestNetworkSegment; $i -lt $HighestNetworkSegment; $i++ ) {
+                        for ( $i = $LowestNetworkSegment; $i -le $HighestNetworkSegment; $i++ ) {
                             for ( $j = 0; $j -lt 255; $j = $j + $Iterator ) {
                                 $tmpCIDR = [String]([String]$MasterIPBNet+[String]$i+"."+[String]$j+"/"+$AllowedSubnetCIDRs[$SubnetSize])
                                 $MasterIPxNet = (($tmpCIDR) -Replace "\d+\/\d+$", "" ) # (($tmp[0]) -Replace "\d+$", "")
@@ -157,10 +166,8 @@ Function New-AzureIaaSSubnet {
                                         $i = $j = 999999
                                         Break
                                     } else {
-                                        #if ( ($UsedVirtualNetworkSubnetCIDRs) -match $MasterIPxNet+"\d+\/" + $AllowedSubnetCIDRs[$SubnetSize]) {
                                         Write-Debug ("Found subnet with same submask, but this range [" + $tmpCIDR + "] is taken. Will check next range.")
                                         Write-Verbose ("Found subnet with same submask, but this range [" + $tmpCIDR + "] is taken. Will check next range.")
-                                        # }
                                     }
                                 }
                             }
@@ -170,12 +177,49 @@ Function New-AzureIaaSSubnet {
                     }
                 }
             }
+
+            $FoundFreeSubnet = $false
             Remove-Variable FoundFreeSubnet, AllMasterNets, CurrentVNet, CurrentMasterNet
         } else {
             Write-Host -ForegroundColor Red ("Could not locate VNet [" + $VNetLongName + "]. Cannot create subnet.")
             $KillSmashDestroy = $true
         }
     }
+
+
+    #
+    # Do some sanity checks to make sure all VNets have been delegated a subnet
+    if ( ($CreateHash.Values.Keys -match "^newsubnet$").count -ne $LocationHash.count ) {
+        Write-Host -ForegroundColor $whc ("One or more VNets could not provision the requested subnet")
+        $CreateHash.Keys | %  {
+            if ( $CreateHash[$_]["newsubnet"] ) {
+                Write-Host -ForegroundColor $whc (" VNet [" + $_ + "] in location [" + $CreateHash[$_]["location"] + "] was delegated subnet [" + $CreateHash[$_]["newsubnet"] + "] with name [" + $CreateHash[$_]["newsubnetname"] + "]")
+            } else {
+                Write-Host -ForegroundColor Red (" VNet [" + $_ + "] in location [" + $CreateHash[$_]["location"] + "] could not delegate subnet.")
+            }
+        }
+        $KillSmashDestroy = $true
+        Break
+    } else {
+        # 
+        # All VNets have been delegated a free subnet.
+        # Make sure all subnets are in the same logical range. Else prompt user
+        #
+
+        $CreateHash.Keys | % {
+            if ( ! $CheckSubnet ) {
+                $CheckSubnet = ($CreateHash[$_]["newsubnet"]) -Replace "^\d+\.\d+", ""
+            }
+            if ( $CheckSubnet -ne (($CreateHash[$_]["newsubnet"]) -Replace "^\d+\.\d+", "") ) {
+                $NotAllSubnetsAreTheSame = $true
+            }
+        }
+    }
+
+    if ( $NotAllSubnetsAreTheSame ) {
+        Write-Host -ForegroundColor Yellow (" *** Warning *** : Not all networks are the same. Please review before continuing.")
+    }
+
 
     if ( $KillSmashDestroy ) {
         Break
@@ -555,21 +599,3 @@ Function New-AzureIaaSEnvironment {
     }
 }
 
-# # Stuff
-# Break
-# $start = 0 
-# $cidr = 27
-# $dostuff = 0
-# $amplifier = ( ( (256 / ([Convert]::ToInt32(("1"+("0"*((($cidr +1)-24)-1))), 2)))  ))
-# $ampiteration = 1
-# $checkit = $amplifier * $ampiteration
-# for ($i = 0; $i -lt 256; $i++) {
-#     if ( $i -eq 0) { 
-#             $i 
-#     } else {
-#         if ( $i -eq ($checkit) ) {
-#             $i
-#             $checkit += $amplifier
-#         }
-#     }
-# }
