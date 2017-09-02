@@ -137,24 +137,30 @@ Function New-AzureIaaSSubnet {
                         for ( $i = $LowestNetworkSegment; $i -lt $HighestNetworkSegment; $i++ ) {
                             for ( $j = 0; $j -lt 255; $j = $j + $Iterator ) {
                                 $tmpCIDR = [String]([String]$MasterIPBNet+[String]$i+"."+[String]$j+"/"+$AllowedSubnetCIDRs[$SubnetSize])
-                                # Compare the requested network segment to those already taken
-                                if ( (($tmpCIDR) -Replace "\/.*$", "") -notin ( ($UsedVirtualNetworkSubnetCIDRs) -Replace "\/.*$", "") ) {
-                                    Write-Verbose (" - Success - The IP range [" +  $tmpCIDR + "] is available !!!") 
-                                    $FoundFreeSubnet = $true
+                                $MasterIPxNet = (($tmpCIDR) -Replace "\d+\/\d+$", "" ) # (($tmp[0]) -Replace "\d+$", "")
 
-                                    $CreateHash[$VNetLongName].Add("newsubnet", $tmpCIDR)
-                                    $CreateHash[$VNetLongName].Add("newsubnetname", ($VNetLongName+"-" + $SubnetName + $DefaultSubnetEnding))
-                                    $i = $j = 999999
-                                    Break
+                                #
+                                # Do some logic to determine if the requested AddressPrefix ($tmpCIDR) will fit into existing subnet
+                                # or if we have to start on a completely new C-net
+                                #
+                                if ( ((($UsedVirtualNetworkSubnetCIDRs) -match "^"+$MasterIPxNet) -Replace "^.*\/", "" ) -ne  $AllowedSubnetCIDRs[$SubnetSize]) {
+                                    # This CIDR is taken by different netmask
+                                    Write-Verbose ("Subnet taken by different CIDR netmask [" + $MasterIPxNet + "x/y" + "]. Will check next C-net.")
+                                    $j = 999999
                                 } else {
-                                    # Sjekk hvis CIDR vi sjekker er av annen / enn den vi nå tester. elers sett j til 9999
-                                    $MasterIPxNet = (($tmpCIDR) -Replace "\d+\/\d+$", "" ) # (($tmp[0]) -Replace "\d+$", "")
-                                    if ( ($UsedVirtualNetworkSubnetCIDRs) -match $MasterIPxNet+"\d+\/" + $AllowedSubnetCIDRs[$SubnetSize]) {
-                                        Write-Debug ("Found subnet with same submask, but this range [" + $tmpCIDR + "] is taken. Will check next range.")
+                                    if ( ((($tmpCIDR) -Replace "\/.*$", "") -notin ( ($UsedVirtualNetworkSubnetCIDRs) -Replace "\/.*$", "")) ) {
+                                        Write-Verbose (" - Success - The IP range [" +  $tmpCIDR + "] is available !!!") 
+                                        $FoundFreeSubnet = $true
+
+                                        $CreateHash[$VNetLongName].Add("newsubnet", $tmpCIDR)
+                                        $CreateHash[$VNetLongName].Add("newsubnetname", ($VNetLongName+"-" + $SubnetName + $DefaultSubnetEnding))
+                                        $i = $j = 999999
+                                        Break
                                     } else {
-                                        Write-Debug ("Subnet taken by different CIDR netmask [" + $tmpCIDR + "]. Will check next C-net.")
-                                        $j = 999999
-                                    
+                                        #if ( ($UsedVirtualNetworkSubnetCIDRs) -match $MasterIPxNet+"\d+\/" + $AllowedSubnetCIDRs[$SubnetSize]) {
+                                        Write-Debug ("Found subnet with same submask, but this range [" + $tmpCIDR + "] is taken. Will check next range.")
+                                        Write-Verbose ("Found subnet with same submask, but this range [" + $tmpCIDR + "] is taken. Will check next range.")
+                                        # }
                                     }
                                 }
                             }
