@@ -254,7 +254,9 @@ Function New-AzureIaaSSubnet {
 
     if ( ! $WhatIf ) {
         if ( $CreateHash ) {
+            $VNetCounter = 0
             $CreateHash.Keys | % {
+                Write-Progress -Activity "Creating subnet" -Status ("Creating subnet [" + $CreateHash[$_]["newsubnetname"] + "]/[" + $CreateHash[$_]["newsubnet"] + "] in VNet [" + $_ + "]") -PercentComplete (100/($CreateHash.count - $VNetCounter)) 
                 Write-Verbose ("Creating subnet [" +  $CreateHash[$_]["newsubnetname"] + "] with CIDR [" + $CreateHash[$_]["newsubnet"] + "]")
                 try {
                     $tmpOutput = Add-AzureRmVirtualNetworkSubnetConfig -VirtualNetwork $CreateHash[$_]["vnetobject"] -Name $CreateHash[$_]["newsubnetname"] -AddressPrefix $CreateHash[$_]["newsubnet"]
@@ -264,6 +266,7 @@ Function New-AzureIaaSSubnet {
                 } catch {
                     Write-Host -ForegroundColor Red ($_.Exception.Message)
                 }
+                $VNetCounter++
             }
         }
     }
