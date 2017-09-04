@@ -8,21 +8,21 @@
 
 if ( $Location ) {
     if ( $Location -notin ($AllowedLocations.Keys) ) {
-        Write-Host -ForegroundColor Red ("Location cannot be used. Allowed locations are: " + $AllowedLocations.Keys)
+        Write-Host -ForegroundColor Red ("Location cannot be used. Allowed locations are: " + ($AllowedLocations.Keys | Sort-Object ))
         Break
     }
 }
 
 if ( $SubnetSize ) {
     if ( $SubnetSize -notin ($AllowedSubnetCIDRs.Keys) ) {
-        Write-Host -ForegroundColor Red ("Specified subnet size cannot be used. Allowed sizes are: " + $AllowedSubnetCIDRs.Keys)
+        Write-Host -ForegroundColor Red ("Specified subnet size cannot be used. Allowed sizes are: " + ($AllowedSubnetCIDRs.Keys | Sort-Object ))
         Break 
     }
 }
 
 if ( $Environment ) {
     if ( $Environment -notin ($AllowedEnvironments.Keys) ) {
-        Write-Host -ForegroundColor Red ("Specified environment cannot be used. Allowed environments are: " + $AllowedEnvironments.Keys)
+        Write-Host -ForegroundColor Red ("Specified environment cannot be used. Allowed environments are: " + ($AllowedEnvironments.Keys | Sort-Object ))
         Break 
     }
 }
