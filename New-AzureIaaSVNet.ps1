@@ -18,7 +18,7 @@ Function New-AzureIaaSVNet {
         [String]$Location,
         [String]$SubnetSize,
         [String]$SubnetName,
-        [String]$Environment = "uat",
+        [String]$Environment = "test",
         [PSCredential]$Cred,
         [Switch]$WhatIf,
         [Switch]$Force
@@ -350,9 +350,9 @@ Function New-AzureIaaSVNet {
             try {
                 if ( $PSCmdlet.MyInvocation.BoundParameters["Verbose"].IsPresent ) {
                     Write-Verbose ("Calling extrenal New-AzureIaaSSubnet function")
-                    New-AzureIaaSSubnet -Name $SubnetName -VNet ($Name.ToLower()) -SubnetSize $SubnetSize -Force -Verbose
+                    New-AzureIaaSSubnet -Name $SubnetName -VNet ($Name.ToLower()) -Environment $Environment -SubnetSize $SubnetSize -Force -Verbose
                 } else {
-                    New-AzureIaaSSubnet -Name $SubnetName -VNet ($Name.ToLower()) -SubnetSize $SubnetSize -Force
+                    New-AzureIaaSSubnet -Name $SubnetName -VNet ($Name.ToLower()) -Environment $Environment -SubnetSize $SubnetSize -Force
                 }
 
             } catch {

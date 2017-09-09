@@ -197,7 +197,7 @@ Function New-AzureIaaSSpoke {
             # Try to determine the next free VirtualNetwork address spaces
             # Keep in mind that this may change if someone adds a VirtualNetwork at the same time
             # $VirtualNetworks = Get-AzureRmVirtualNetwork
-            for ( $i=10; $i -lt 240; $i++ ) {
+            for ( $i=10; $i -lt 127; $i++ ) {
                 $tmpCIDR = "10.$i.0.0/16"
                 if ( $tmpCIDR -notin $UsedVirtualNetworkCIDRs.AddressPrefixes ) {
                     $tmpObj = New-Object -TypeName Microsoft.Azure.Commands.Network.Models.PSAddressSpace

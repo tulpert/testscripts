@@ -1,4 +1,4 @@
-Function New-AzureIaaSSubnet {
+Function New-AzureIaaSSubnetTemplate {
 
     # Todo: 
     #
@@ -17,11 +17,24 @@ Function New-AzureIaaSSubnet {
         [int32]$PreferredCNet,
         [String]$SubnetSize = "large",
         [String]$Environment = "test",
+        [ValidateSet("2015-06-15")][String]$APIVersion = "2015-06-15",
+        [ValidateSet("netsec-spoke-rg", "hakontest-rg")][String]$ResourceGroupName = "hakontest-rg",
         [Switch]$ForceLegacyNamingConvention,       # This will allow subnet to be "netne-$VNet" and "netwe-$VNet"
+        [Switch]$ShowTemplate,
         [Switch]$WhatIf,
         [Switch]$Force
     )
     $SubnetName = (($Name.ToLower()) -Replace ("-subnet$"), "" )
+    $TemplateString = '
+{
+  "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+  },
+  "variables": {
+  },
+  "resources": [
+'
 
     #
     # Load defaults
@@ -79,7 +92,7 @@ Function New-AzureIaaSSubnet {
 
     # Access the Virtual Networks in Azure and store them for further use
     try {
-        $AZVNets = Get-AzureRMVirtualNetwork
+        $AZVNets = Get-AzureRMVirtualNetwork -ResourceGroupName $ResourceGroupName
     } catch {
         Write-Host -ForegroundColor Red ("Could not retrieve Azure Virtual Networks. Make sure you are logged in and have access to the Azure portal.")
         Write-Host -ForegroundColor Red ("Error message:`n" + ($_.Exception.Message))
@@ -170,20 +183,20 @@ Function New-AzureIaaSSubnet {
                                 #
                                 if ( ((($UsedVirtualNetworkSubnetCIDRs) -match "^"+$MasterIPxNet) -Replace "^.*\/", "" ) -ne  $AllowedSubnetCIDRs[$SubnetSize]) {
                                     # This CIDR is taken by different netmask
-                                    Write-Verbose ("Subnet taken by different CIDR netmask [" + $MasterIPxNet + "x/y" + "]. Will check next C-net.")
+                                    Write-Debug ("Subnet taken by different CIDR netmask [" + $MasterIPxNet + "x/y" + "]. Will check next C-net.")
                                     $j = 999999
                                 } else {
                                     if ( ((($tmpCIDR) -Replace "\/.*$", "") -notin ( ($UsedVirtualNetworkSubnetCIDRs) -Replace "\/.*$", "")) ) {
-                                        Write-Verbose (" - Success - The IP range [" +  $tmpCIDR + "] is available !!!") 
+                                        Write-Verbose (" - Success - Located free IP range in VNet [" +  $tmpCIDR + "]") 
                                         $FoundFreeSubnet = $true
 
+                                        $CreateHash[$VNetLongName].Add("vnetaddress", $CurrentMasterNet)
                                         $CreateHash[$VNetLongName].Add("newsubnet", $tmpCIDR)
                                         $CreateHash[$VNetLongName].Add("newsubnetname", ($VNetLongName+"-" + $SubnetName + $DefaultSubnetEnding))
                                         $i = $j = 999999
                                         Break
                                     } else {
                                         Write-Debug ("Found subnet with same submask, but this range [" + $tmpCIDR + "] is taken. Will check next range.")
-                                        Write-Verbose ("Found subnet with same submask, but this range [" + $tmpCIDR + "] is taken. Will check next range.")
                                     }
                                 }
                             }
@@ -264,29 +277,77 @@ Function New-AzureIaaSSubnet {
         }
     } else {
         Write-Host -ForegroundColor $whc ($wis + $InfoMessage)
-        Break
     }
     Remove-Variable InfoMessage
 
-    if ( ! $WhatIf ) {
-        if ( $CreateHash ) {
-            $VNetCounter = 0
-            $CreateHash.Keys | % {
-                Write-Progress -Activity "Creating subnet" -Status ("Creating subnet [" + $CreateHash[$_]["newsubnetname"] + "]/[" + $CreateHash[$_]["newsubnet"] + "] in VNet [" + $_ + "]") -PercentComplete (100/($CreateHash.Count - $VNetCounter)) 
-                Write-Verbose ("Creating subnet [" +  $CreateHash[$_]["newsubnetname"] + "] with CIDR [" + $CreateHash[$_]["newsubnet"] + "]")
-                # Create the Subnet
-                try {
-                    $tmpOutput = Add-AzureRmVirtualNetworkSubnetConfig -VirtualNetwork $CreateHash[$_]["vnetobject"] -Name $CreateHash[$_]["newsubnetname"] -AddressPrefix $CreateHash[$_]["newsubnet"]
-                    $tmpOutput = Set-AzureRmVirtualNetwork -VirtualNetwork $CreateHash[$_]["vnetobject"]
-                    Write-Verbose ("Finished creating subnet [" + $CreateHash[$_]["newsubnetname"] + "]" )
-                    Remove-Variable tmpOutput
-                } catch {
-                    Write-Host -ForegroundColor Red ($_.Exception.Message)
-                }
-                $VNetCounter++
-            }
+    if ( $CreateHash ) {
+        $VNetCounter = 0
+        $CreateHash.Keys | % {
+            # Write-Progress -Activity "Creating subnet" -Status ("Creating subnet [" + $CreateHash[$_]["newsubnetname"] + "]/[" + $CreateHash[$_]["newsubnet"] + "] in VNet [" + $_ + "]") -PercentComplete (100/($CreateHash.Count - $VNetCounter)) 
+            # Write-Verbose ("Creating subnet [" +  $CreateHash[$_]["newsubnetname"] + "] with CIDR [" + $CreateHash[$_]["newsubnet"] + "]")
+            # Create the Subnet template contents
+$TemplateString += '
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "'+$APIVersion+'",
+      "name": "' + $_ + '",
+      "location": "' + $CreateHash[$_]["location"] + '",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "' + $CreateHash[$_]["vnetaddress"] + '"
+          ]
         }
+      }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks/subnets",
+       "apiVersion": "' + [string]$APIVersion + '",
+       "name": "' + $_ + '/' + $CreateHash[$_]["newsubnetname"] + '",
+       "location": "' + $CreateHash[$_]["location"] + '",
+       "properties": {
+         "addressPrefix": "' + $CreateHash[$_]["newsubnet"] + '"
+       }
+    },'
+
+      #// "dependsOn": "Microsoft.Network/virtualNetworks/"' + $_ + '",
+        }
+    }
+    $TemplateString = $TemplateString.Substring(0,($TemplateString.length-1))    # Remove the trailing ',' if this is the last element of the array
+    $TemplateString += '
+  ],
+  "outputs": {}
+}
+    
+    '
+    if ( $ShowTemplate ) {
+        Write-Host -ForegroundColor DarkCyan ("----- Start JSON -----")
+        Write-Host -ForegroundColor Cyan ($TemplateString)
+        Write-Host -ForegroundColor DarkCyan ("----- Stop JSON -----")
+    }
+
+
+    if ( ! $WhatIf ) {
+      Write-Host -ForegroundColor Cyan ($TemplateString)
+      Write-Verbose ("Creating temporary file to store JSON data.")
+      $TmpFile = New-TemporaryFile
+      Write-Verbose ("Temporary file created: " + $TmpFile.FullName)
+      Write-Verbose ("Writing to temporary file.")
+      $TemplateString | Out-File -Encoding utf8 $TmpFile
+      Write-Verbose ("Testing and publishing Template")
+Write-Host (" Test-AzureRmResourceGroupDeployment -ResourceGroupName "+$ResourceGroupName+" -TemplateFile "+$TmpFile.FullName)
+      if ( (Test-AzureRmResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateFile $TmpFile.FullName).Count -eq 0 ) { 
+          try {
+              New-AzureRmResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateFile $TmpFile.FullName 
+          } catch {
+              Write-Error ("Failed to publish Template.")
+              Write-Error ($_.Exception.Message)
+          }
+        } else {
+            Write-Error ("Ooops. Something is wrong in the Template file.")
+        }     
+    } else {
+        Write-Host -ForegroundColor $whc ($wis + "No changes have been made.")
     }
 }
 
-    
