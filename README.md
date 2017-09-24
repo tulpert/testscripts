@@ -1,1 +1,1 @@
-A collection of testscripts for testing and tricks
+A collection of testscripts for testing and tricks.
